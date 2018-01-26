@@ -1,0 +1,12 @@
+User admin
+PidFile /opt/var/run/tor.pid
+DataDirectory /opt/var/lib/tor
+VirtualAddrNetwork 10.254.0.0/16    # Виртуальная подсеть для .onion ресурсов
+AutomapHostsOnResolve 1
+TransPort 9040
+TransListenAddress 127.0.0.1
+TransListenAddress 192.168.0.1      # Адрес LAN интерфейса
+DNSPort 9053
+DNSListenAddress 127.0.0.1
+#SOCKSPort 192.168.0.1:9050         # Адрес tor socks proxy в LAN для подключения браузера и пр.
+ExcludeExitNodes {ru}               # Исключение российских исходящих нодов

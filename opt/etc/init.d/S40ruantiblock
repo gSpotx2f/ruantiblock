@@ -1,0 +1,22 @@
+#!/bin/sh
+
+PROC="/opt/usr/bin/ruantiblock.sh"
+
+case "$1" in
+    start|restart)
+        $PROC "$1"
+    ;;
+    stop)
+        $PROC "$1"
+    ;;
+    update|force-update)
+        $PROC "$1"
+    ;;
+    status)
+        $PROC "$1"
+    ;;
+    *)
+        echo " Usage: `basename $0` start|stop|restart|update|force-update|status"
+        exit 1
+    ;;
+esac
