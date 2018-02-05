@@ -2,7 +2,7 @@
 
 ########################################################################
 #
-# ruantiblock v0.6 (c) 2018
+# ruantiblock v0.7 (c) 2018
 #
 # Author:       gSpot <https://github.com/gSpotx2f/ruantiblock>
 # License:      GPLv3
@@ -18,7 +18,7 @@ IF_IN="br0"
 ### Максимальное кол-во элементов списка ipset (по умол.: 65536, на данный момент уже не хватает для полного списка ip...)
 IPSET_MAXELEM=100000
 ### Таймаут для записей в сете $IPSET_DNSMASQ
-IPSET_DNSMASQ_TIMEOUT=600
+IPSET_DNSMASQ_TIMEOUT=900
 ### Порт транспарентного proxy tor (параметр TransPort в torrc)
 TOR_TRANS_PORT=9040
 ### DNS-сервер для резолвинга в домене .onion (tor)
@@ -74,11 +74,13 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 WGET_PARAMS="-T 60 -q -O -"
+
 IPSETCMD=`which ipset`
 if [ $? -ne 0 ]; then
     echo " Error! ipset doesn't exists..." >&2
     exit 1
 fi
+
 LOGGERCMD=`which logger`
 if [ $USE_LOGGER = "1" -a $? -ne 0 ]; then
     echo " Error! logger doesn't exists..." >&2
@@ -147,13 +149,14 @@ IPT_TP_RULE="-m set ! --match-set ${IPSET_TOTAL_PROXY} ${IPT_IPSET_TARGET}"
 Help () {
 
 cat << EOF
- Usage: `basename $0` start|stop|destroy|restart|update|force-update|total-proxy-on|total-proxy-off|renew-ipt|status|status-html|--help
+ Usage: `basename $0` start|stop|destroy|restart|update|force-update|data-files|total-proxy-on|total-proxy-off|renew-ipt|status|status-html|--help
         start : Start
         stop : Stop
         destroy : Stop and destroy ipsets
         restart : Restart
         update : Update blacklist
         force-update : Force update blacklist
+        data-files : Create ${IP_DATA} & ${DNSMASQ_DATA} (without network functions)
         total-proxy-on : Total-proxy mode on
         total-proxy-off : Total-proxy mode off
         renew-ipt : Add only iptables chain ${IPT_CHAIN} & rules
@@ -167,6 +170,7 @@ cat << EOF
         `basename $0` restart
         `basename $0` update
         `basename $0` force-update
+        `basename $0` data-files
         `basename $0` total-proxy-on
         `basename $0` total-proxy-off
         `basename $0` status
@@ -240,7 +244,7 @@ MakeDataFiles () {
             ### Массивы из констант с исключениями
             makeConstArray(ENVIRON["EXCLUDE_ENTRIES"], ex_entrs_array, " ");
             makeConstArray(ENVIRON["OPT_EXCLUDE_SLD"], ex_sld_array, " ");
-            total_ip=0; total_networks=0; total_fqdn=0;
+            total_ip=0; total_cidr=0; total_fqdn=0;
             ### Определение разделителя записей (строк)
             if(ENVIRON["BL_UPDATE_MODE"] == "2")
                 RS="\134";
@@ -263,7 +267,7 @@ MakeDataFiles () {
         };
         ### Получение SLD из доменов низших уровней
         function getSld(val) {
-            return substr(val, match(val, /[a-z0-9-]+[.]([a-z]{2,}|xn--[a-z0-9]+)$/));
+            return substr(val, match(val, /[a-z0-9-]+[.][a-z0-9-]+$/));
         };
         ### Запись в $DNSMASQ_DATA_TMP
         function writeDNSData(val) {
@@ -272,11 +276,11 @@ MakeDataFiles () {
             printf "ipset=/%s/%s\n", val, ENVIRON["IPSET_DNSMASQ"] > ENVIRON["DNSMASQ_DATA_TMP"];
         };
         ### Обработка ip и CIDR
-        function checkIp(array1, array2, url,  _i) {
+        function checkIp(array1, array2, fqdn,  _i) {
             for(_i in array1) {
                 if(_i in ex_entrs_array) continue;
-                ### Если запись реестра содержит URL и $BLOCK_MODE=2, то все ip-адреса соответствующие этому URL удаляются из дальнейшей обработки (для исключения дублирующих элементов ipset в дальнейшем)
-                if(ENVIRON["BLOCK_MODE"] == "2" && url > 0) {
+                ### Если запись реестра содержит FQDN и $BLOCK_MODE=2, то все ip-адреса соответствующие этому FQDN удаляются из дальнейшей обработки (для исключения дублирующих элементов ipset в дальнейшем)
+                if(ENVIRON["BLOCK_MODE"] == "2" && fqdn > 0) {
                     checkDuplicates(ex_ip_array, _i);
                     if(_i in array2) delete array2[_i];
                 }
@@ -284,14 +288,11 @@ MakeDataFiles () {
                     checkDuplicates(array2, _i);
             };
         };
-        ### Обработка URL
-        function checkURL(array1, array2, cyr,  _i, _sld, _call_idn) {
+        ### Обработка FQDN
+        function checkFQDN(array1, array2, cyr,  _i, _sld, _call_idn) {
              for(_i in array1) {
-                ### Обрезка URL до FQDN
                 sub(/^[\052][.]/, "", _i);
-                sub(/^[a-z0-9]*:[\057]{2}/, "", _i);
                 if(ENVIRON["STRIP_WWW"] == "1") sub(/^www[.]/, "", _i);
-                sub(/(:[0-9]{2,5})?([\057].*)?$/, "", _i);
                 if(_i in ex_entrs_array) continue;
                 if(cyr == 1) {
                     ### Кириллические FQDN кодируются $IDNCMD в punycode ($AWKCMD вызывает $IDNCMD с параметром _i, в отдельном экземпляре /bin/sh, далее STDOUT $IDNCMD функцей getline помещается в _i)
@@ -302,7 +303,7 @@ MakeDataFiles () {
                 ### Проверка на отсутствие лишних символов и повторы
                 if(_i ~ /^[a-z0-9.-]+$/ && checkDuplicates(array2, _i) == 0) {
                     ### Выбор записей SLD
-                    if(_i ~ /^[a-z0-9-]+[.]([a-z]{2,}|xn--[a-z0-9]+)$/)
+                    if(_i ~ /^[a-z0-9-]+[.][a-z0-9-]+$/)
                         ### Каждому SLD задается предельный лимит, чтобы далее исключить из очистки при сравнении с $SD_LIMIT
                         sld_array[_i]=ENVIRON["SD_LIMIT"];
                     else {
@@ -329,16 +330,13 @@ MakeDataFiles () {
             return counter;
         };
         (ENVIRON["BL_UPDATE_MODE"] != "2") || ($0 ~ /^n/) {
-            ip=0; cidr=0; url=0; url_cyr=0;
+            ip=0; cidr=0; fqdn=0; fqdn_cyr=0;
             ### Удаление массивов с элементами предыдущей записи (строки)
-            delete ip_array; delete cidr_array; delete url_array; delete url_cyr_array;
+            delete ip_array; delete cidr_array; delete fqdn_array; delete fqdn_cyr_array;
             ### Перебор полей в текущей записи (строке)
             for(i = 1; i <= NF; i++) {
-                ### Пропуск URL c ip-адресами хостов (http://192.168.0.1/sample.html и т.п.)
-                if($i ~ /^[a-z0-9]*:[\057]{2}[0-9]{1,3}([.][0-9]{1,3}){3}/)
-                    continue;
                 ### Отбор ip в ip_array ([ n]? и [ ]? в выражении - костыль для разбора полей с rublacklist.net, gsub удаляет этот мусор)
-                else if($i ~ /^[ n]?[0-9]{1,3}([.][0-9]{1,3}){3}[ ]?$/) {
+                if($i ~ /^[ n]?[0-9]{1,3}([.][0-9]{1,3}){3}[ ]?$/) {
                     gsub(/[ n]/, "", $i);
                     ip_array[$i]="";
                     ip++;
@@ -349,34 +347,34 @@ MakeDataFiles () {
                     cidr_array[$i]="";
                     cidr++;
                 }
-                ### Отбор URL в url_array
-                else if($i ~ /^([a-z0-9]*:[\057]{2})?[a-z0-9.\052-]+[.]([a-z]{2,}|xn--[a-z0-9]+)/) {
-                    url_array[$i]="";
-                    url++;
+                ### Отбор FQDN в fqdn_array
+                else if($i ~ /^[a-z0-9.\052-]+[.]([a-z]{2,}|xn--[a-z0-9]+)$/) {
+                    fqdn_array[$i]="";
+                    fqdn++;
                 }
-                ### Отбор кирилических URL в url_cyr_array
-                else if(ENVIRON["USE_IDN"] == "1" && $i ~ /^([a-z0-9]*:[\057]{2})?[^a-zA-Z.]+[.]([a-z]|[^a-z]){2,}/) {
-                    url_cyr_array[$i]="";
-                    url_cyr++;
+                ### Отбор кириллических FQDN в fqdn_cyr_array
+                else if(ENVIRON["USE_IDN"] == "1" && $i ~ /^[^a-zA-Z.]+[.]([a-z]|[^a-z]){2,}$/) {
+                    fqdn_cyr_array[$i]="";
+                    fqdn_cyr++;
                 };
             };
-            ### В случае, если запись реестра не содержит URL, то, не смотря на $BLOCK_MODE=2, в $IP_DATA_TMP добавляются найденные в записи ip и CIDR-подсети (после проверки на повторы)
+            ### В случае, если запись реестра не содержит FQDN, то, не смотря на $BLOCK_MODE=2, в $IP_DATA_TMP добавляются найденные в записи ip и CIDR-подсети (после проверки на повторы)
             if(ENVIRON["BLOCK_MODE"] == "2") {
-                if(url > 0)
-                    checkURL(url_array, total_fqdn_array, 0);
-                if(url_cyr > 0) {
-                    checkURL(url_cyr_array, total_fqdn_array, 1);
+                if(fqdn > 0)
+                    checkFQDN(fqdn_array, total_fqdn_array, 0);
+                if(fqdn_cyr > 0) {
+                    checkFQDN(fqdn_cyr_array, total_fqdn_array, 1);
                 };
             };
             if(ip > 0)
-                checkIp(ip_array, total_ip_array, url);
+                checkIp(ip_array, total_ip_array, fqdn);
             if(cidr > 0)
-                checkIp(cidr_array, total_cidr_array, url);
+                checkIp(cidr_array, total_cidr_array, fqdn);
         }
         END {
             ### Запись в $IP_DATA_TMP ip-адресов и подсетей CIDR
             total_ip=writeIpsetEntries(total_ip_array, ENVIRON["IPSET_IP_TMP"], total_ip);
-            total_networks=writeIpsetEntries(total_cidr_array, ENVIRON["IPSET_CIDR_TMP"], total_networks);
+            total_cidr=writeIpsetEntries(total_cidr_array, ENVIRON["IPSET_CIDR_TMP"], total_cidr);
             ### Оптимизация отобранных FQDN и запись в $DNSMASQ_DATA_TMP
             if(ENVIRON["BLOCK_MODE"] == "2") {
                 ### Чистка sld_array[] от тех SLD, которые встречались при обработке менее $SD_LIMIT (остаются только достигнувшие $SD_LIMIT)
@@ -402,14 +400,14 @@ MakeDataFiles () {
                 };
             };
             ### STDOUT
-            printf " %s ip, %s CIDR and %s FQDN entries added\n", total_ip, total_networks, total_fqdn;
+            printf " %s ip, %s CIDR and %s FQDN entries added\n", total_ip, total_cidr, total_fqdn;
             ### Запись в $UPDATE_STATUS_FILE
-            printf "%s %s %s", total_ip, total_networks, total_fqdn > ENVIRON["UPDATE_STATUS_FILE"];
+            printf "%s %s %s", total_ip, total_cidr, total_fqdn > ENVIRON["UPDATE_STATUS_FILE"];
             ### Запись в лог
             if(ENVIRON["USE_LOGGER"] == 1)
-                system(LOGGERCMD " " LOGGER_PARAMS " \"" total_ip " ip, " total_networks " CIDR and " total_fqdn " FQDN entries added\"");
+                system(LOGGERCMD " " LOGGER_PARAMS " \"" total_ip " ip, " total_cidr " CIDR and " total_fqdn " FQDN entries added\"");
             ### Если кол-во обработанных записей менее $BLLIST_MIN_ENTRS, то код завершения 2
-            if((total_ip + total_networks + total_fqdn) < ENVIRON["BLLIST_MIN_ENTRS"]) exit 2;
+            if((total_ip + total_cidr + total_fqdn) < ENVIRON["BLLIST_MIN_ENTRS"]) exit 2;
             exit 0;
     }'
 
@@ -574,6 +572,30 @@ FillIpsets () {
 
 }
 
+RunDataFiles () {
+
+    local _return_code
+
+    [ -d "$DATA_DIR" ] || mkdir -p "$DATA_DIR"
+    echo "$$" > "$UPDATE_PID_FILE"
+
+    case $BL_UPDATE_MODE in
+        2)
+            GetRublacklist | MakeDataFiles
+        ;;
+        *)
+            GetAntizapret | MakeDataFiles
+        ;;
+    esac
+
+    _return_code=$?
+
+    rm -f "$UPDATE_PID_FILE"
+
+    return $_return_code
+
+}
+
 Update () {
 
     local _return_code=0
@@ -586,17 +608,7 @@ Update () {
 
         echo " ${NAME} ${1}..."
         MakeLogRecord "${1}..."
-        [ -d "$DATA_DIR" ] || mkdir -p "$DATA_DIR"
-        echo "$$" > "$UPDATE_PID_FILE"
-
-        case $BL_UPDATE_MODE in
-            2)
-                GetRublacklist | MakeDataFiles
-            ;;
-            *)
-                GetAntizapret | MakeDataFiles
-            ;;
-        esac
+        RunDataFiles
 
         case $? in
             0)
@@ -619,7 +631,6 @@ Update () {
         esac
 
         printf " `date +%d.%m.%Y-%H:%M`\n" >> "$UPDATE_STATUS_FILE"
-        rm -f "$UPDATE_PID_FILE"
 
     fi
 
@@ -818,6 +829,14 @@ case "$1" in
     update|force-update)
         Update "$1"
         Status html
+    ;;
+    data-files)
+        if [ -e "$UPDATE_PID_FILE" ] && [ "$1" != "force-update" ]; then
+            echo " ${NAME} - Error! another instance of update is already running..." >&2
+            exit 2
+        else
+            RunDataFiles
+        fi
     ;;
     total-proxy-on)
         TotalProxyOff &> /dev/null
