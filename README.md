@@ -69,7 +69,7 @@ ___________________
     modprobe xt_set
 
 
-2. В /etc/storage/post_iptables_script.sh доавьте следующие строки:
+2. В /etc/storage/post_iptables_script.sh добавьте следующие строки:
 
     RUAB="/opt/usr/bin/ruantiblock.sh"
 
@@ -105,6 +105,62 @@ ___________________
 ___________________
 
 
+Установка во внутреннюю память роутера (для VPN-конфигурации).
+
+
+1. Скачайте ruantiblock.sh в /etc/storage и выполните chmod:
+
+    wget --no-check-certificate -O /etc/storage/ruantiblock.sh https://raw.githubusercontent.com/gSpotx2f/ruantiblock/master/opt/usr/bin/ruantiblock.sh
+
+    chmod +x /etc/storage/ruantiblock.sh
+
+
+2. В скрипте /etc/storage/ruantiblock.sh измените следующие переменные:
+
+    USE_IDN=0
+
+    USE_HTML_STATUS=0
+
+    DATA_DIR="/tmp/var/${NAME}"
+
+    INIT_SCRIPT="$0"
+
+
+3. В /etc/storage/post_iptables_script.sh добавьте следующие строки:
+
+    RUAB="/etc/storage/ruantiblock.sh"
+
+    [ -f "$RUAB" ] && $RUAB renew-ipt
+
+
+4. В /etc/storage/dnsmasq/dnsmasq.conf добавьте следующую строку:
+
+    conf-file=/tmp/var/ruantiblock/ruantiblock.dnsmasq
+
+
+5. В /etc/storage/started_script.sh добавьте следующие строки:
+
+    mkdir -p /tmp/var/ruantiblock
+
+    echo "" > /tmp/var/ruantiblock/ruantiblock.dnsmasq
+
+    /etc/storage/ruantiblock.sh start
+
+    /etc/storage/ruantiblock.sh update
+
+
+6. Можно добавить задание для обновления в Cron (прим.: обновление списка каждые 5 дней в 05:00). В /etc/storage/cron/crontabs/admin добавьте следующую строку:
+
+    0 5 */5 * * /etc/storage/ruantiblock.sh update
+
+
+Также должен быть выполнен пункт 1 из раздела "Настройка прошивки" (раскомментировать строки с modprobe).
+
+После установки не забудьте записать хранилище /etc/storage во флеш-память.
+
+___________________
+
+
 Параметры запуска.
 
 
@@ -121,7 +177,7 @@ ___________________
     ruantiblock.sh status-html      # Обновление html-страницы статуса
 
 
-После изменения конфигурации ruantiblock.sh необходимо обязательно выполнить удаление всех сетов и правил, а также обновление (если оно не запустилось автоматически):
+После изменения конфигурации ruantiblock.sh необходимо обязательно выполнить удаление всех сетов и правил iptables, а также обновление (если оно не запустилось автоматически):
 
     ruantiblock.sh destroy
     ruantiblock.sh start

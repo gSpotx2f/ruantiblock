@@ -55,7 +55,7 @@ PROXY_MODE=1
 VPN_PKTS_MARK=1
 ### Режим полного прокси при старте скрипта (0 - off, 1 - on). Если 1, то весь трафик всегда идёт через прокси. Все пакеты попадающие в цепочку $IPT_CHAIN попадают в tor или VPN, за исключением сетей из $TOTAL_PROXY_EXCLUDE_NETS. Списки блокировок не используются для фильтрации
 DEF_TOTAL_PROXY=0
-### Трафик в заданные сети идет напрямую, не попадая в tor или VPN в режиме total-proxy
+### Трафик в заданные сети идет напрямую, не попадая в tor или VPN, в режиме total-proxy
 TOTAL_PROXY_EXCLUDE_NETS="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
 ### Html-страница с инфо о текущем статусе (0 - off, 1 - on)
 USE_HTML_STATUS=1
@@ -70,34 +70,30 @@ AWKCMD="awk"
 IPTCMD="iptables"
 WGETCMD=`which wget`
 if [ $? -ne 0 ]; then
-    echo " Error! wget doesn't exists..." >&2
+    echo " Error! Wget doesn't exists" >&2
     exit 1
 fi
 WGET_PARAMS="-T 60 -q -O -"
-
 IPSETCMD=`which ipset`
 if [ $? -ne 0 ]; then
-    echo " Error! ipset doesn't exists..." >&2
+    echo " Error! Ipset doesn't exists" >&2
     exit 1
 fi
-
 LOGGERCMD=`which logger`
 if [ $USE_LOGGER = "1" -a $? -ne 0 ]; then
-    echo " Error! logger doesn't exists..." >&2
+    echo " Error! Logger doesn't exists" >&2
     USE_LOGGER=0
 fi
 LOGGER_PARAMS="-t `basename $0`[${$}] -p user.notice"
 IDNCMD=`which idn`
 if [ $USE_IDN = "1" -a $? -ne 0 ]; then
-    echo " Error! idn doesn't exists..." >&2
+    echo " Error! Idn doesn't exists" >&2
     USE_IDN=0
 fi
 DNSMASQ_RESTART_CMD="/sbin/restart_dhcpd; /sbin/restart_dns"
 DATA_DIR="/opt/var/${NAME}"
 export DNSMASQ_DATA="${DATA_DIR}/${NAME}.dnsmasq"
-export DNSMASQ_DATA_TMP="${DNSMASQ_DATA}.tmp"
 export IP_DATA="${DATA_DIR}/${NAME}.ip"
-export IP_DATA_TMP="${IP_DATA}.tmp"
 export IPSET_IP="${NAME}-ip"
 export IPSET_IP_TMP="${IPSET_IP}-tmp"
 export IPSET_CIDR="${NAME}-cidr"
@@ -159,7 +155,7 @@ cat << EOF
         data-files : Create ${IP_DATA} & ${DNSMASQ_DATA} (without network functions)
         total-proxy-on : Total-proxy mode on
         total-proxy-off : Total-proxy mode off
-        renew-ipt : Add only iptables chain ${IPT_CHAIN} & rules
+        renew-ipt : Renew iptables configuration
         status : Status & some info
         status-html : Update html-status (if USE_HTML_STATUS=1)
         -h|--help : This message
@@ -222,9 +218,6 @@ MakeDataFiles () {
 
     local _return_code
 
-    [ -e "$IP_DATA_TMP" ] && rm -f "$IP_DATA_TMP"
-    [ -e "$DNSMASQ_DATA_TMP" ] && rm -f "$DNSMASQ_DATA_TMP"
-
     ### Создание $IP_DATA и $DNSMASQ_DATA
 
     $AWKCMD -F "[;,|]" -v IDNCMD="$IDNCMD" -v LOGGERCMD="$LOGGERCMD" -v LOGGER_PARAMS="$LOGGER_PARAMS" '
@@ -269,11 +262,11 @@ MakeDataFiles () {
         function getSld(val) {
             return substr(val, match(val, /[a-z0-9-]+[.][a-z0-9-]+$/));
         };
-        ### Запись в $DNSMASQ_DATA_TMP
+        ### Запись в $DNSMASQ_DATA
         function writeDNSData(val) {
             if(ENVIRON["ALT_NSLOOKUP"] == 1)
-                printf "server=/%s/%s\n", val, ENVIRON["ALT_DNS_ADDR"] > ENVIRON["DNSMASQ_DATA_TMP"];
-            printf "ipset=/%s/%s\n", val, ENVIRON["IPSET_DNSMASQ"] > ENVIRON["DNSMASQ_DATA_TMP"];
+                printf "server=/%s/%s\n", val, ENVIRON["ALT_DNS_ADDR"] > ENVIRON["DNSMASQ_DATA"];
+            printf "ipset=/%s/%s\n", val, ENVIRON["IPSET_DNSMASQ"] > ENVIRON["DNSMASQ_DATA"];
         };
         ### Обработка ip и CIDR
         function checkIp(array1, array2, fqdn,  _i) {
@@ -321,10 +314,10 @@ MakeDataFiles () {
                 };
             };
         };
-        ### Запись в $IP_DATA_TMP
+        ### Запись в $IP_DATA
         function writeIpsetEntries(array, set, counter,  _i) {
             for(_i in array) {
-                printf "add %s %s\n", set, _i > ENVIRON["IP_DATA_TMP"];
+                printf "add %s %s\n", set, _i > ENVIRON["IP_DATA"];
                 counter++;
             };
             return counter;
@@ -358,7 +351,7 @@ MakeDataFiles () {
                     fqdn_cyr++;
                 };
             };
-            ### В случае, если запись реестра не содержит FQDN, то, не смотря на $BLOCK_MODE=2, в $IP_DATA_TMP добавляются найденные в записи ip и CIDR-подсети (после проверки на повторы)
+            ### В случае, если запись реестра не содержит FQDN, то, не смотря на $BLOCK_MODE=2, в $IP_DATA добавляются найденные в записи ip и CIDR-подсети (после проверки на повторы)
             if(ENVIRON["BLOCK_MODE"] == "2") {
                 if(fqdn > 0)
                     checkFQDN(fqdn_array, total_fqdn_array, 0);
@@ -372,10 +365,14 @@ MakeDataFiles () {
                 checkIp(cidr_array, total_cidr_array, fqdn);
         }
         END {
-            ### Запись в $IP_DATA_TMP ip-адресов и подсетей CIDR
+            ### Удаление $IP_DATA
+            system("rm -f \"" ENVIRON["IP_DATA"] "\"");
+            ### Запись в $IP_DATA ip-адресов и подсетей CIDR
             total_ip=writeIpsetEntries(total_ip_array, ENVIRON["IPSET_IP_TMP"], total_ip);
             total_cidr=writeIpsetEntries(total_cidr_array, ENVIRON["IPSET_CIDR_TMP"], total_cidr);
-            ### Оптимизация отобранных FQDN и запись в $DNSMASQ_DATA_TMP
+            ### Удаление $DNSMASQ_DATA
+            system("rm -f \"" ENVIRON["DNSMASQ_DATA"] "\"");
+            ### Оптимизация отобранных FQDN и запись в $DNSMASQ_DATA
             if(ENVIRON["BLOCK_MODE"] == "2") {
                 ### Чистка sld_array[] от тех SLD, которые встречались при обработке менее $SD_LIMIT (остаются только достигнувшие $SD_LIMIT)
                 if(ENVIRON["SD_LIMIT"] > 1) {
@@ -383,13 +380,13 @@ MakeDataFiles () {
                         if(sld_array[j] < ENVIRON["SD_LIMIT"])
                            delete sld_array[j];
                     };
-                    ### Добавление SLD из sld_array[] в $DNSMASQ_DATA_TMP (вместо исключаемых далее субдоменов достигнувших $SD_LIMIT)
+                    ### Добавление SLD из sld_array[] в $DNSMASQ_DATA (вместо исключаемых далее субдоменов достигнувших $SD_LIMIT)
                     for(l in sld_array) {
                         total_fqdn++;
                         writeDNSData(l);
                     };
                 };
-                #### Запись из total_fqdn_array[] в $DNSMASQ_DATA_TMP с исключением всех SLD присутствующих в sld_array[] и их субдоменов (если ENVIRON["SD_LIMIT"] > 1)
+                #### Запись из total_fqdn_array[] в $DNSMASQ_DATA с исключением всех SLD присутствующих в sld_array[] и их субдоменов (если ENVIRON["SD_LIMIT"] > 1)
                 for(k in total_fqdn_array) {
                     if(ENVIRON["SD_LIMIT"] > 1 && getSld(k) in sld_array)
                         continue;
@@ -414,11 +411,6 @@ MakeDataFiles () {
     _return_code=$?
 
     if [ $_return_code -eq 0 ]; then
-
-        [ -e "$IP_DATA" ] && rm -f "$IP_DATA"
-        [ -e "$DNSMASQ_DATA" ] && rm -f "$DNSMASQ_DATA"
-        [ -f "$IP_DATA_TMP" ] && mv -f "$IP_DATA_TMP" "$IP_DATA"
-        [ -f "$DNSMASQ_DATA_TMP" ] && mv -f "$DNSMASQ_DATA_TMP" "$DNSMASQ_DATA"
 
         if [ "$PROXY_MODE" = "2" ]; then
             printf "\n" >> "$DNSMASQ_DATA"
@@ -562,10 +554,10 @@ FillIpsets () {
         cat "$IP_DATA" | $IPSETCMD restore && { $IPSETCMD swap "$IPSET_IP_TMP" "$IPSET_IP"; $IPSETCMD swap "$IPSET_CIDR_TMP" "$IPSET_CIDR"; }
 
         if [ $? -eq 0 ]; then
-            echo " Ok."
+            echo " Ok"
         else
-            echo " Error! ipset doesn't updated..." >&2
-            MakeLogRecord "Error! ipset doesn't updated..."
+            echo " Error! Ipset wasn't updated" >&2
+            MakeLogRecord "Error! Ipset wasn't updated"
         fi
 
     fi
@@ -601,8 +593,8 @@ Update () {
     local _return_code=0
 
     if [ -e "$UPDATE_PID_FILE" ] && [ "$1" != "force-update" ]; then
-        echo " ${NAME} ${1} - Error! another instance of update is already running..." >&2
-        MakeLogRecord "${1} - Error! another instance of update is already running..."
+        echo " ${NAME} ${1} - Error! Another instance of update is already running" >&2
+        MakeLogRecord "${1} - Error! Another instance of update is already running"
         _return_code=2
     else
 
@@ -612,20 +604,20 @@ Update () {
 
         case $? in
             0)
-                echo " Blacklist updated..."
-                MakeLogRecord "Blacklist updated..."
+                echo " Blacklist updated"
+                MakeLogRecord "Blacklist updated"
                 FlushIpSets "$IPSET_DNSMASQ"
                 FillIpsets
                 DnsmasqRestart
             ;;
             2)
-                echo " Error! Blacklist update error..." >&2
-                MakeLogRecord "Error! Blacklist update error..."
+                echo " Error! Blacklist update error" >&2
+                MakeLogRecord "Error! Blacklist update error"
                 _return_code=1
             ;;
             *)
-                echo " Error! Something going wrong..." >&2
-                MakeLogRecord "Error! Something going wrong..."
+                echo " Error! Something going wrong" >&2
+                MakeLogRecord "Error! Something going wrong"
                 _return_code=1
             ;;
         esac
@@ -832,7 +824,7 @@ case "$1" in
     ;;
     data-files)
         if [ -e "$UPDATE_PID_FILE" ] && [ "$1" != "force-update" ]; then
-            echo " ${NAME} - Error! another instance of update is already running..." >&2
+            echo " ${NAME} - Error! Another instance of update is already running" >&2
             exit 2
         else
             RunDataFiles
@@ -843,8 +835,8 @@ case "$1" in
         TotalProxyOn &> /dev/null
 
         if [ $? -eq 0 ]; then
-            echo " ${IPSET_TOTAL_PROXY} enabled..."
-            MakeLogRecord "${IPSET_TOTAL_PROXY} enabled..."
+            echo " ${IPSET_TOTAL_PROXY} enabled"
+            MakeLogRecord "${IPSET_TOTAL_PROXY} enabled"
         else
             echo " ${NAME} is off..." >&2
         fi
@@ -855,10 +847,10 @@ case "$1" in
         TotalProxyOff &> /dev/null
 
         if [ $? -ne 0 ]; then
-            echo " ${IPSET_TOTAL_PROXY} is allready disabled..." >&2
+            echo " ${IPSET_TOTAL_PROXY} is already disabled" >&2
         else
-            echo " ${IPSET_TOTAL_PROXY} disabled..."
-            MakeLogRecord "${IPSET_TOTAL_PROXY} disabled..."
+            echo " ${IPSET_TOTAL_PROXY} disabled"
+            MakeLogRecord "${IPSET_TOTAL_PROXY} disabled"
         fi
 
         Status html
