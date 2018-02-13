@@ -3,16 +3,7 @@
 PROC="/opt/usr/bin/ruantiblock.sh"
 
 case "$1" in
-    start|restart)
-        $PROC "$1"
-    ;;
-    stop)
-        $PROC "$1"
-    ;;
-    update|force-update)
-        $PROC "$1"
-    ;;
-    status)
+    start|restart|stop|update|force-update|status)
         $PROC "$1"
     ;;
     *)
