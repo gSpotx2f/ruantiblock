@@ -213,7 +213,6 @@ local function compactDomainList(fqdnList, subdomainsCount)
         for sld in pairs(subdomainsCount) do
             if config.neverGroupDomains[sld] then
                 subdomainsCount[sld] = 0
-                break
             end
             for _, pattern in ipairs(config.neverGroupMasks) do
                 if sld:find(pattern) then
