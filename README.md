@@ -19,25 +19,25 @@ ___________________
 Установка.
 
 
-1. Установите idn и tor из репозитория Entware:
+1. Установите lua, idn и tor из репозитория Entware:
 
-    opkg install idn lua tor tor-geoip
+    opkg install lua idn tor tor-geoip
 
 
-2. Скачайте модуль ltn12.lua в `/opt/lib/lua`:**
+2. Скачайте модуль ltn12.lua в /opt/lib/lua:
 
     mkdir -p /opt/lib/lua
 
     wget --no-check-certificate -O /opt/lib/lua/ltn12.lua https://raw.githubusercontent.com/diegonehab/luasocket/master/src/ltn12.lua
 
 
-3. Скачайте ruantiblock.sh и модули в /opt/usr/bin/ и выполните chmod:
+3. Скачайте ruantiblock.sh и модули в /opt/usr/bin и выполните chmod:
 
     mkdir -p /opt/usr/bin
 
     wget --no-check-certificate -O /opt/usr/bin/ruantiblock.sh https://raw.githubusercontent.com/gSpotx2f/ruantiblock/master/opt/usr/bin/ruantiblock.sh
 
-    wget --no-check-certificate -O /opt/usr/bin/ruab.az.fqdn.lua https://raw.githubusercontent.com/gSpotx2f/ruantiblock/master/opt/usr/bin/ruab.az.fqdn.lua
+    wget --no-check-certificate -O /opt/usr/bin/ruab.az-rbl.all.lua https://raw.githubusercontent.com/gSpotx2f/ruantiblock/master/opt/usr/bin/ruab.az-rbl.all.lua
 
     wget --no-check-certificate -O /opt/usr/bin/ruab.az.fqdn.sh https://raw.githubusercontent.com/gSpotx2f/ruantiblock/master/opt/usr/bin/ruab.az.fqdn.sh
 

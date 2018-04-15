@@ -84,7 +84,7 @@ HTML_MAIN_FONT_COLOR="#333333"
 USER_ENTRIES_FILE="${DATA_DIR}/user_entries"
 ### Модули для получения и обработки блэклиста
 MODULES_DIR="/opt/usr/bin"
-BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab.az.fqdn.lua"
+BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab.az-rbl.all.lua"
 #BLLIST_MODULE_CMD="${MODULES_DIR}/ruab.az.fqdn.sh"
 #BLLIST_MODULE_CMD="${MODULES_DIR}/ruab.az-rbl.all.sh"
 

@@ -97,28 +97,28 @@ $WGETCMD $WGET_PARAMS "$BLLIST_URL" | $AWKCMD -v IDNCMD="$IDNCMD" '
     };
     ### Обработка FQDN
     function checkFQDN(val, array, cyr,  _sld, _call_idn) {
-            sub(/^[\052][.]/, "", val);
-            if(ENVIRON["STRIP_WWW"] == "1") sub(/^www[.]/, "", val);
-            if(val in ex_entrs_array) next;
-            if(cyr == 1) {
-                ### Кириллические FQDN кодируются $IDNCMD в punycode ($AWKCMD вызывает $IDNCMD с параметром val, в отдельном экземпляре /bin/sh, далее STDOUT $IDNCMD функцей getline помещается в val)
-                _call_idn=IDNCMD" "val;
-                _call_idn | getline val;
-                close(_call_idn);
-            }
-            ### Проверка на отсутствие лишних символов и повторы
-            if(val ~ /^[a-z0-9.-]+$/) {
-                array[val]="";
-                ### Выбор записей SLD
-                if(val ~ /^[a-z0-9-]+[.][a-z0-9-]+$/)
-                    ### Каждому SLD задается предельный лимит, чтобы далее исключить из очистки при сравнении с $SD_LIMIT
-                    sld_array[val]=ENVIRON["SD_LIMIT"];
+        sub(/^[\052][.]/, "", val);
+        if(ENVIRON["STRIP_WWW"] == "1") sub(/^www[.]/, "", val);
+        if(val in ex_entrs_array) next;
+        if(cyr == 1) {
+            ### Кириллические FQDN кодируются $IDNCMD в punycode ($AWKCMD вызывает $IDNCMD с параметром val, в отдельном экземпляре /bin/sh, далее STDOUT $IDNCMD функцей getline помещается в val)
+            _call_idn=IDNCMD" "val;
+            _call_idn | getline val;
+            close(_call_idn);
+        }
+        ### Проверка на отсутствие лишних символов и повторы
+        if(val ~ /^[a-z0-9.-]+$/) {
+            ### SLD из FQDN
+            _sld=getSld(val);
+            ### Каждому SLD задается предельный лимит, чтобы далее исключить из очистки при сравнении с $SD_LIMIT
+            if(val == _sld)
+                sld_array[val]=ENVIRON["SD_LIMIT"];
             else {
             ### Обработка остальных записей низших ур-ней
                 ### Пропуск доменов 3-го ур-ня вида: subdomain.xx(x).xx
                 if(ENVIRON["OPT_EXCLUDE_3LD_REGEXP"] == "1" && val ~ /[.][a-z]{2,3}[.][a-z]{2}$/)
                     next;
-                _sld=getSld(val);
+                array[val]=_sld;
                 ### Исключение доменов не подлежащих оптимизации
                 if(_sld in ex_sld_array) next;
                 ### Если SLD (полученный из записи низшего ур-ня) уже обрабатывался ранее, то счетчик++, если нет, то добавляется элемент sld_array[SLD] и счетчик=1 (далее, если после обработки всех записей, счетчик >= $SD_LIMIT, то в итоговом выводе остается только запись SLD, а все записи низших ур-ней будут удалены)
@@ -153,21 +153,21 @@ $WGETCMD $WGET_PARAMS "$BLLIST_URL" | $AWKCMD -v IDNCMD="$IDNCMD" '
             writeIpsetEntries(total_ip_array, ENVIRON["IPSET_IP_TMP"]);
             ### Оптимизация отобранных FQDN и запись в $DNSMASQ_DATA
             system("rm -f \"" ENVIRON["DNSMASQ_DATA"] "\"");
-            ### Чистка sld_array[] от тех SLD, которые встречались при обработке менее $SD_LIMIT (остаются только достигнувшие $SD_LIMIT)
+            ### Чистка sld_array[] от тех SLD, которые встречались при обработке менее $SD_LIMIT (остаются только достигнувшие $SD_LIMIT) и добавление их в $DNSMASQ_DATA (вместо исключаемых далее субдоменов достигнувших $SD_LIMIT)
             if(ENVIRON["SD_LIMIT"] > 1) {
                 for(j in sld_array) {
                     if(sld_array[j] < ENVIRON["SD_LIMIT"])
                         delete sld_array[j];
-                };
-                ### Добавление SLD из sld_array[] в $DNSMASQ_DATA (вместо исключаемых далее субдоменов достигнувших $SD_LIMIT)
-                for(l in sld_array) {
-                    output_fqdn++;
-                    writeDNSData(l);
+                    else {
+                        output_fqdn++;
+                        writeDNSData(j);
+                    };
                 };
             };
-            #### Запись из total_fqdn_array[] в $DNSMASQ_DATA с исключением всех SLD присутствующих в sld_array[] и их субдоменов (если ENVIRON["SD_LIMIT"] > 1)
+            ### Запись из total_fqdn_array[] в $DNSMASQ_DATA с исключением всех SLD присутствующих в sld_array[] и их субдоменов (если ENVIRON["SD_LIMIT"] > 1)
             for(k in total_fqdn_array) {
-                if(ENVIRON["SD_LIMIT"] > 1 && getSld(k) in sld_array)
+                #print(total_fqdn_array[k])
+                if(ENVIRON["SD_LIMIT"] > 1 && total_fqdn_array[k] in sld_array)
                     continue;
                 else {
                     output_fqdn++;
