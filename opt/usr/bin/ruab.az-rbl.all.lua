@@ -56,7 +56,7 @@ local blTables = {
     ["cidrCount"] = 0,
     ["fqdn"] = {},
     ["sdCount"] = {},
-    ["ips"] = {},
+    ["ip"] = {},
     ["cidr"] = {},
 }
 
@@ -133,7 +133,8 @@ end
 local function fillIpTable(val, tname)
     if not config.excludeEntries[val] and not blTables[tname][val] then
         blTables[tname][val] = true
-        blTables.ipCount = blTables.ipCount + 1
+        local counter = tname .. "Count"
+        blTables[counter] = blTables[counter] + 1
     end
 end
 
@@ -150,7 +151,7 @@ local function ipSink(chunk)
     if chunk and chunk ~= "" then
         local ipPattern = "%d+%.%d+%.%d+%.%d+"
         for ipStr in chunk:gmatch("(" .. ipPattern .. ")[ ,;\n]") do
-            fillIpTable(ipStr, "ips")
+            fillIpTable(ipStr, "ip")
         end
         for cidrStr in chunk:gmatch(ipPattern .. "[/]%d[%d]?") do
             fillIpTable(cidrStr, "cidr")
@@ -166,7 +167,7 @@ local function azFqdnSink(chunk)
         for fqdnStr in chunk:gmatch("(.-)\n") do
             if fqdnStr then
                 if fqdnStr:match("^%d+%.%d+%.%d+%.%d+$") then
-                    fillIpTable(fqdnStr, "ips")
+                    fillIpTable(fqdnStr, "ip")
                 elseif fqdnStr:match("^[a-z0-9_%-%.]-[a-z0-9_%-]+%.[a-z0-9%-%.]+$") then
                     fillDomainTables(fqdnStr)
                 elseif config["convertIdn"] and fqdnStr:match("^[^\\/&%?]-[^\\/&%?%.]+%.[^\\/&%?%.]+%.?$") then
@@ -188,7 +189,7 @@ local function rblFqdnSink(chunk)
                     fqdnStr = fqdnStr:gsub("\\u(%x%x%x%x)", function(s) return convertToPunycode(hex2unicode(s)) end)
                 end
                 if fqdnStr:match("^%d+%.%d+%.%d+%.%d+$") then
-                    fillIpTable(fqdnStr, "ips")
+                    fillIpTable(fqdnStr, "ip")
                 elseif fqdnStr:match("^[a-z0-9_%-%.]-[a-z0-9_%-]+%.[a-z0-9%-%.]+$") then
                     fillDomainTables(fqdnStr)
                 end
@@ -281,7 +282,7 @@ if retVal == 1 and (retCode == 200 or not http) then
     domainTable, recordsNum = compactDomainList(blTables.fqdn, blTables.sdCount)
     if (recordsNum + blTables.ipCount + blTables.cidrCount) > config.blMinimumEntries then
         generateDnsmasqConfig(config.dnsmasqConfigPath, domainTable)
-        generateIpsetConfig(config.ipsetConfigPath, { [config.ipsetIp] = blTables.ips, [config.ipsetCidr] = blTables.cidr })
+        generateIpsetConfig(config.ipsetConfigPath, { [config.ipsetIp] = blTables.ip, [config.ipsetCidr] = blTables.cidr })
         returnCode = 0
     else
         returnCode = 2
