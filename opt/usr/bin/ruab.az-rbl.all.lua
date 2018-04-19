@@ -104,7 +104,7 @@ local function convertToPunycode(input)
     return (output)
 end
 
-function chunkBuffer(recordsSeparator)
+local function chunkBuffer(recordsSeparator)
     local recordsSeparator = recordsSeparator
     local buff = ""
     local retValue = ""
