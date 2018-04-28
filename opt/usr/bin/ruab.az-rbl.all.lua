@@ -2,8 +2,9 @@
     IP, FQDN, CIDR
 
     Модуль для следующих источников:
-     http://api.antizapret.info/group.php?data=domain
+     http://api.antizapret.info/all.php?type=csv
      http://api.antizapret.info/group.php?data=ip
+     http://api.antizapret.info/group.php?data=domain
      http://reestr.rublacklist.net/api/current
 
     Исходный скрипт из статьи: https://habrahabr.ru/post/270657
@@ -13,7 +14,7 @@ local config = {
     dataDir = "/opt/var/ruantiblock",
     wgetCmd = "wget -T 60 -q -O -",
     blSource = "antizapret",    -- antizapret или rublacklist
-    blockMode = "fqdn",  -- ip или fqdn
+    blockMode = "hybrid",  -- ip, fqdn, hybrid
     groupBySld = 16,    -- количество поддоменов после которого в список вносится весь домен второго уровня целиком
     excludeEntries = {  -- записи, исключаемые из итоговых файлов (ip, FQDN, CIDR)
         ["youtube.com"] = true
@@ -43,14 +44,18 @@ local config = {
     ipsetCidr = "ruantiblock-cidr-tmp",
     altDnsAddr = "8.8.8.8",
     bllistUrl1_0="http://api.antizapret.info/all.php?type=csv",
-    bllistUrl1_1="http://api.antizapret.info/group.php?data=domain",
-    bllistUrl1_2="http://api.antizapret.info/group.php?data=ip",
+    bllistUrl1_1="http://api.antizapret.info/group.php?data=ip",
+    bllistUrl1_2="http://api.antizapret.info/group.php?data=domain",
     bllistUrl2="http://reestr.rublacklist.net/api/current",
+    --bllistUrl2="http://api.reserve-rbl.ru/api/current",
 }
 config.dnsmasqConfigPath = config.dataDir .. "/ruantiblock.dnsmasq"
 config.ipsetConfigPath = config.dataDir .. "/ruantiblock.ip"
 config.updateStatusPath = config.dataDir .. "/update_status"
 
+local ipPattern = "%d+%.%d+%.%d+%.%d+"
+local cidrPattern = ipPattern .. "[/]%d[%d]?"
+local fqdnPattern = "[a-z0-9_%-%.]-[a-z0-9_%-]+%.[a-z0-9%-%.]"
 local blTables = {
     ["ipCount"] = 0,
     ["cidrCount"] = 0,
@@ -65,7 +70,7 @@ local function prequire(package)
     if not result then
         return nil
     end
-    return require(package)     -- return the package value
+    return require(package)
 end
 
 local idn = prequire("idn")
@@ -139,22 +144,31 @@ local function fillIpTable(val, tname)
 end
 
 local function fillDomainTables(val)
-    if config["stripWww"] then val = val:gsub("^www%.", ""):gsub("%.$", "") end
-    local subDomain, secondLevelDomain = val:match("^([a-z0-9%-%.]-)([a-z0-9%-]+%.[a-z0-9%-]+)$")
+    if config["stripWww"] then val = val:gsub("^www%.", "") end
+    local subDomain, secondLevelDomain = val:match("^([a-z0-9_%-%.]-)([a-z0-9_%-]+%.[a-z0-9%-]+)$")
     if secondLevelDomain then
         blTables.fqdn[val] = secondLevelDomain
         blTables.sdCount[secondLevelDomain] = (blTables.sdCount[secondLevelDomain] or 0) + 1
     end
 end
 
+local function parseIpString(val)
+    if val and val ~= "" then
+        for ipEntry in val:gmatch("[0-9%./]+") do
+            if ipEntry:match("^" .. ipPattern .. "$") then
+                fillIpTable(ipEntry, "ip")
+            elseif ipEntry:match("^" .. cidrPattern .. "$") then
+                fillIpTable(ipEntry, "cidr")
+            end
+        end
+    end
+end
+
 local function ipSink(chunk)
     if chunk and chunk ~= "" then
-        local ipPattern = "%d+%.%d+%.%d+%.%d+"
-        for ipStr in chunk:gmatch("(" .. ipPattern .. ")[ ,;\n]") do
-            fillIpTable(ipStr, "ip")
-        end
-        for cidrStr in chunk:gmatch(ipPattern .. "[/]%d[%d]?") do
-            fillIpTable(cidrStr, "cidr")
+        local ipStringPattern = (config.blSource == "antizapret") and "(.-)\n" or "([^;]+);[^;]-;[^;]-;[^;]-;[^;]-;[^;]-\\n"
+        for ipString in chunk:gmatch(ipStringPattern) do
+            parseIpString(ipString)
         end
     end
     return true
@@ -162,18 +176,19 @@ end
 
 local function azFqdnSink(chunk)
     if chunk and chunk ~= "" then
-        chunk = chunk:gsub("*%.", ""):lower()
-        --for fqdnStr in chunk:gmatch("[^;]+;[^;]-;([^;]+);[^;]+\n") do -- для http://api.antizapret.info/all.php?type=csv
-        for fqdnStr in chunk:gmatch("(.-)\n") do
-            if fqdnStr then
-                if fqdnStr:match("^%d+%.%d+%.%d+%.%d+$") then
-                    fillIpTable(fqdnStr, "ip")
-                elseif fqdnStr:match("^[a-z0-9_%-%.]-[a-z0-9_%-]+%.[a-z0-9%-%.]+$") then
+        --chunk = chunk:gsub("&amp;", "")
+        local entryPattern = (config.blockMode == "fqdn") and "((.-))\n" or "[^;]+;[^;]-;([^;]-);([^;]+)\n"
+        for fqdnStr, ipStr in chunk:gmatch(entryPattern) do
+            if #fqdnStr > 0 and not fqdnStr:match("^" .. ipPattern .. "$") then
+                fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
+                if fqdnStr:match("^" .. fqdnPattern .. "+$") then
                     fillDomainTables(fqdnStr)
                 elseif config["convertIdn"] and fqdnStr:match("^[^\\/&%?]-[^\\/&%?%.]+%.[^\\/&%?%.]+%.?$") then
                     fqdnStr = convertToPunycode(fqdnStr)
                     fillDomainTables(fqdnStr)
                 end
+            elseif (config.blockMode == "hybrid" or fqdnStr:match("^" .. ipPattern .. "$")) and #ipStr > 0 then
+                parseIpString(ipStr)
             end
         end
     end
@@ -182,17 +197,18 @@ end
 
 local function rblFqdnSink(chunk)
     if chunk and chunk ~= "" then
-        for fqdnStr in chunk:gmatch("[^;]+;([^;]+);[^;]-;[^;]-;[^;]-;[^;]-\\n") do
-            if fqdnStr then
-                fqdnStr = fqdnStr:gsub("*%.", ""):lower()
+        --chunk = chunk:gsub("&amp;", "")
+        for ipStr, fqdnStr in chunk:gmatch("([^;]+);([^;]-);[^;]-;[^;]-;[^;]-;[^;]-\\n") do
+            if #fqdnStr > 0 and not fqdnStr:match("^" .. ipPattern .. "$") then
+                fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
                 if config["convertIdn"] then
                     fqdnStr = fqdnStr:gsub("\\u(%x%x%x%x)", function(s) return convertToPunycode(hex2unicode(s)) end)
                 end
-                if fqdnStr:match("^%d+%.%d+%.%d+%.%d+$") then
-                    fillIpTable(fqdnStr, "ip")
-                elseif fqdnStr:match("^[a-z0-9_%-%.]-[a-z0-9_%-]+%.[a-z0-9%-%.]+$") then
+                if fqdnStr:match("^" .. fqdnPattern .. "+$") then
                     fillDomainTables(fqdnStr)
                 end
+            elseif (config.blockMode == "hybrid" or fqdnStr:match("^" .. ipPattern .. "$")) and #ipStr > 0 then
+                parseIpString(ipStr)
             end
         end
     end
@@ -250,19 +266,14 @@ end
 
 local retVal, retCode, url, rs, sink
 
-if config.blSource == "rublacklist" then
-    sink = (config.blockMode == "fqdn") and rblFqdnSink or ipSink
+if config.blSource == "antizapret" then
+    sink = (config.blockMode == "fqdn" or config.blockMode == "hybrid") and azFqdnSink or ipSink
+    url = (config.blockMode == "fqdn") and config.bllistUrl1_2 or ((config.blockMode == "hybrid") and config.bllistUrl1_0 or config.bllistUrl1_1)
+    rs = "\n"
+elseif config.blSource == "rublacklist" then
+    sink = (config.blockMode == "fqdn" or config.blockMode == "hybrid") and rblFqdnSink or ipSink
     url = config.bllistUrl2
     rs = "\\n"
-elseif config.blSource == "antizapret" then
-    if config.blockMode == "fqdn" then
-        sink = azFqdnSink
-        url = config.bllistUrl1_1
-    else
-        sink = ipSink
-        url = config.bllistUrl1_2
-    end
-    rs = "\n"
 else
     error("Blacklist source should be either 'rublacklist' or 'antizapret'")
 end

@@ -144,18 +144,18 @@ ___________________
 
 2. В скрипте /etc/storage/ruantiblock.sh измените следующие переменные:
 
-    USE_HTML_STATUS=0                                   # отключаем страницу статуса в /opt/share/www/custom
+    USE_HTML_STATUS=0                                       # отключаем страницу статуса в /opt/share/www/custom
 
-    DATA_DIR="/tmp/var/${NAME}"                         # DATA_DIR в /tmp/var/ruantiblock
+    DATA_DIR="/tmp/var/${NAME}"                             # DATA_DIR в /tmp/var/ruantiblock
 
-    INIT_SCRIPT="$0"                                    # это костыль для post_iptables_script.sh
+    INIT_SCRIPT="$0"                                        # это костыль для post_iptables_script.sh
 
-    MODULES_DIR="/etc/storage"                          # директория в которой находятся модули для получения и обработки блэклиста
+    MODULES_DIR="/etc/storage"                              # директория в которой находятся модули для получения и обработки блэклиста
 
-    BLLIST_MODULE_CMD="${MODULES_DIR}/ruab.az.fqdn.sh"  # модуль ruab.az.fqdn.sh
+    BLLIST_MODULE_CMD="${MODULES_DIR}/ruab.az-rbl.all.sh"   # модуль ruab.az-rbl.all.sh
 
 
-3. В скрипте /etc/storage/ruab.az.fqdn.sh измените следующие переменные:
+3. В скрипте /etc/storage/ruab.az-rbl.all.sh измените следующие переменные:
 
     USE_IDN=0                   # отключаем idn
 

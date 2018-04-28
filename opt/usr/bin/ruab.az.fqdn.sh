@@ -27,7 +27,7 @@ export OPT_EXCLUDE_3LD_REGEXP=0
 ### Лимит для субдоменов. При превышении, в список ${NAME}.dnsmasq будет добавлен весь домен 2-го ур-ня, вместо множества субдоменов
 export SD_LIMIT=16
 ### Преобразование кириллических доменов в punycode
-export USE_IDN=1
+export USE_IDN=0
 
 ############################ Configuration #############################
 
@@ -74,7 +74,7 @@ $WGETCMD $WGET_PARAMS "$BLLIST_URL" | $AWKCMD -v IDNCMD="$IDNCMD" '
     };
     ### Получение SLD из доменов низших уровней
     function getSld(val) {
-        return substr(val, match(val, /[a-z0-9-]+[.][a-z0-9-]+$/));
+        return substr(val, match(val, /[a-z0-9_-]+[.][a-z0-9-]+$/));
     };
     ### Запись в $DNSMASQ_DATA
     function writeDNSData(val) {

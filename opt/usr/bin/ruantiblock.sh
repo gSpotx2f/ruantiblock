@@ -16,7 +16,7 @@
 ### Входящий сетевой интерфейс для правил iptables
 IF_IN="br0"
 ### Максимальное кол-во элементов списка ipset (по умол.: 65536, на данный момент уже не хватает для полного списка ip...)
-IPSET_MAXELEM=100000
+IPSET_MAXELEM=150000
 ### Таймаут для записей в сете $IPSET_DNSMASQ
 IPSET_DNSMASQ_TIMEOUT=900
 ### Порт транспарентного proxy tor (параметр TransPort в torrc)
@@ -98,6 +98,7 @@ IPT_IPSET_MSET="-m set --match-set"
 IPT_TABLE="nat"
 IPT_FIRST_CHAIN_RULE="-i ${IF_IN} -j ${IPT_CHAIN}"
 IPT_IPSET_TARGET="dst -p tcp -j REDIRECT --to-ports ${TOR_TRANS_PORT}"
+#IPT_IPSET_TARGET="dst -j REDIRECT --to-ports ${TOR_TRANS_PORT}"    # весь трафик (не только TCP)
 IPT_IPSETS="${IPSET_ONION} ${IPSET_CIDR} ${IPSET_IP} ${IPSET_DNSMASQ}"
 
 if [ "$PROXY_MODE" = "2" ]; then
@@ -304,7 +305,18 @@ AddUserEntries () {
 
         if [ -f "$USER_ENTRIES_FILE" -a -s "$USER_ENTRIES_FILE" ]; then
 
-            $AWKCMD '
+            $AWKCMD 'BEGIN {
+                        while((getline ip_string <ENVIRON["IP_DATA"]) > 0){
+                            split(ip_string, ip_string_arr, " ");
+                            ip_data_array[ip_string_arr[3]]="";
+                        };
+                        close(ENVIRON["IP_DATA"]);
+                        while((getline fqdn_string <ENVIRON["DNSMASQ_DATA"]) > 0){
+                            split(fqdn_string, fqdn_string_arr, "/");
+                            fqdn_data_array[fqdn_string_arr[2]]="";
+                        };
+                        close(ENVIRON["DNSMASQ_DATA"]);
+                    }
                     function writeIpsetEntries(val, set) {
                         printf "add %s %s\n", set, val >> ENVIRON["IP_DATA"];
                     };
@@ -314,11 +326,11 @@ AddUserEntries () {
                         printf "ipset=/%s/%s\n", val, ENVIRON["IPSET_DNSMASQ"] >> ENVIRON["DNSMASQ_DATA"];
                     };
                     ($0 !~ /^($|#)/) {
-                        if($0 ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}$/)
+                        if($0 ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}$/ && !($0 in ip_data_array))
                             writeIpsetEntries($0, ENVIRON["IPSET_IP_TMP"]);
-                        else if($0 ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}[\057][0-9]{1,2}$/)
+                        else if($0 ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}[\057][0-9]{1,2}$/ && !($0 in ip_data_array))
                             writeIpsetEntries($0, ENVIRON["IPSET_CIDR_TMP"]);
-                        else if($0 ~ /^[a-z0-9.\052-]+[.]([a-z]{2,}|xn--[a-z0-9]+)([ ][0-9]{1,3}([.][0-9]{1,3}){3}([#][0-9]{2,5})?)?$/)
+                        else if($0 ~ /^[a-z0-9.\052-]+[.]([a-z]{2,}|xn--[a-z0-9]+)([ ][0-9]{1,3}([.][0-9]{1,3}){3}([#][0-9]{2,5})?)?$/ && !($1 in fqdn_data_array))
                             writeDNSData($1, $2);
                     }' "$USER_ENTRIES_FILE"
 
