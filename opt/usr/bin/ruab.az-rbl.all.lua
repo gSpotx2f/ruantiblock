@@ -12,7 +12,7 @@
 
 local config = {
     dataDir = "/opt/var/ruantiblock",
-    wgetCmd = "wget -T 60 -q -O -",
+    wgetCmd = "wget -q -O -",
     blSource = "antizapret",    -- antizapret или rublacklist
     blockMode = "hybrid",  -- ip, fqdn, hybrid
     groupBySld = 16,    -- количество поддоменов после которого в список вносится весь домен второго уровня целиком

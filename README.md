@@ -21,7 +21,7 @@ ___________________
 
 1. Установите lua, idn и tor из репозитория Entware:
 
-    opkg install lua idn tor tor-geoip
+    opkg install lua luasocket idn tor tor-geoip
 
 
 2. Скачайте модуль ltn12.lua в /opt/lib/lua:
@@ -143,6 +143,8 @@ ___________________
 
 
 2. В скрипте /etc/storage/ruantiblock.sh измените следующие переменные:
+
+    PROXY_MODE=2                                            # режим VPN
 
     USE_HTML_STATUS=0                                       # отключаем страницу статуса в /opt/share/www/custom
 
