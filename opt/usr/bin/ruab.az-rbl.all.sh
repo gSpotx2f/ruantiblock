@@ -24,7 +24,7 @@ export STRIP_WWW=1
 ### Записи (ip, CIDR, FQDN) исключаемые из списка блокировки (через пробел)
 export EXCLUDE_ENTRIES="youtube.com"
 ### SLD не подлежащие оптимизации (через пробел)
-export OPT_EXCLUDE_SLD="livejournal.com facebook.com vk.com blog.jp msk.ru net.ru org.ru net.ua com.ua org.ua co.uk"
+export OPT_EXCLUDE_SLD="livejournal.com facebook.com vk.com blog.jp msk.ru net.ru org.ru net.ua com.ua org.ua co.uk amazonaws.com"
 ### Не оптимизировать домены 3-го ур-ня вида: subdomain.xx(x).xx (.msk.ru .net.ru .org.ru .net.ua .com.ua .org.ua .co.uk и т.п.) (0 - off, 1 - on)
 export OPT_EXCLUDE_3LD_REGEXP=0
 ### Лимит для субдоменов. При превышении, в список ${NAME}.dnsmasq будет добавлен весь домен 2-го ур-ня, вместо множества субдоменов
@@ -48,7 +48,7 @@ if [ $? -ne 0 ]; then
     echo " Error! Wget doesn't exists" >&2
     exit 1
 fi
-WGET_PARAMS="-T 60 -q -O -"
+WGET_PARAMS="-q -O -"
 IDNCMD=`which idn`
 if [ $USE_IDN = "1" -a $? -ne 0 ]; then
     echo " Idn doesn't exists" >&2
@@ -135,7 +135,7 @@ MakeDataFiles () {
         };
         ### Получение SLD из доменов низших уровней
         function getSld(val) {
-            return substr(val, match(val, /[a-z0-9_-]+[.][a-z0-9-]+$/));
+            return substr(val, match(val, /[a-z0-9-]+[.][a-z0-9-]+$/));
         };
         ### Запись в $DNSMASQ_DATA
         function writeDNSData(val) {

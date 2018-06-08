@@ -30,12 +30,13 @@ local config = {
         ["net.ua"] = true,
         ["com.ua"] = true,
         ["org.ua"] = true,
-        ["co.uk"] = true
+        ["co.uk"] = true,
+        ["amazonaws.com"] = true,
     },
     neverGroupMasks = {},   -- { "^%a%a%a?.%a%a$" },    -- не распространять на org.ru, net.ua и аналогичные
     stripWww = true,
     idnCmd = "idn", -- внешняя утилита idn
-    convertIdn = true,
+    convertIdn = false,
     idnType = "standalone",   -- standalone или lua. Тип idn: внешняя утилита или библиотека lua-idn
     altNsLookup = true,    -- отправлять DNS запросы заблокированных доменов через альтернативный DNS
     blMinimumEntries = 1000,    -- костыль если список получился короче, значит что-то пошло не так и конфиги не обновляем
@@ -100,7 +101,7 @@ local function convertToPunycode(input)
     if config["idnType"] == "lua" and idn then
         output = idn.encode(input)
     elseif config["idnType"] == "standalone" then
-        local idnHandler = assert(io.popen(config.idnCmd .. " \"" .. input .. "\"", "r"), "Standalone idn returns an error")
+        local idnHandler = assert(io.popen(config.idnCmd .. " \"" .. input .. "\"", "r"))
         output = idnHandler:read("*l")
         idnHandler:close()
     else
