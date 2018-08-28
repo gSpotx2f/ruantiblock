@@ -15,6 +15,8 @@
 
 ### Входящий сетевой интерфейс для правил iptables
 IF_IN="br0"
+### WAN интерфейс
+IF_WAN="ppp0"
 ### Максимальное кол-во элементов списка ipset (по умол.: 65536, на данный момент уже не хватает для полного списка ip...)
 IPSET_MAXELEM=150000
 ### Таймаут для записей в сете $IPSET_DNSMASQ
@@ -27,8 +29,12 @@ export ONION_DNS_ADDR="127.0.0.1#9053"
 export USE_LOGGER=1
 ### Режим обработки пакетов в правилах iptables (1 - Tor, 2 - VPN)
 PROXY_MODE=1
+### Применять правила проксификации для трафика локальных сервисов роутера (0 - off, 1 - on)
+PROXY_LOCAL_CLIENTS=1
 ### --set-mark для отбора пакетов в VPN туннель
 VPN_PKTS_MARK=1
+### VPN интерфейс для правил iptables
+IF_VPN="tun0"
 ### Режим полного прокси при старте скрипта (0 - off, 1 - on). Если 1, то весь трафик всегда идёт через прокси. Все пакеты попадающие в цепочку $IPT_CHAIN попадают в tor или VPN, за исключением сетей из $TOTAL_PROXY_EXCLUDE_NETS. Списки блокировок не используются для фильтрации
 DEF_TOTAL_PROXY=0
 ### Трафик в заданные сети идет напрямую, не попадая в tor или VPN, в режиме total-proxy
@@ -48,6 +54,7 @@ export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
 AWKCMD="awk"
 IPTCMD="iptables"
+IPCMD="ip"
 IPSETCMD=`which ipset`
 if [ $? -ne 0 ]; then
     echo " Error! Ipset doesn't exists" >&2
@@ -93,6 +100,11 @@ BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab.az-rbl.all.lua"
 IPT_FIRST_CHAIN="PREROUTING"
 IPT_QUEUE_CHAIN="$IPT_CHAIN"
 IPT_IPSET_MSET="-m set --match-set"
+
+### Проксификация трафика локальных клиентов
+IPT_OUTPUT_FIRST_RULE="-j ${IPT_CHAIN}"
+WAN_IP=`$IPCMD addr list dev $IF_WAN | $AWKCMD '/inet/{sub("/[0-9]{1,2}$", "", $2); print $2}'`
+VPN_NAT_RULE="-m mark --mark ${VPN_PKTS_MARK} -s ${WAN_IP} -o ${IF_VPN} -j MASQUERADE"
 
 ### Tor конфигурация
 IPT_TABLE="nat"
@@ -217,6 +229,14 @@ AddIptRules () {
     $IPTCMD -t "$IPT_TABLE" -N "$IPT_CHAIN"
     $IPTCMD -t "$IPT_TABLE" -I "$IPT_FIRST_CHAIN" 1 $IPT_FIRST_CHAIN_RULE
 
+    ### Проксификация трафика локальных клиентов
+    if [ "$PROXY_LOCAL_CLIENTS" = "1" ]; then
+        $IPTCMD -t "$IPT_TABLE" -I OUTPUT 1 $IPT_OUTPUT_FIRST_RULE
+        if [ "$PROXY_MODE" = "2" -a -n "$WAN_IP" ]; then
+            $IPTCMD -t nat -A POSTROUTING $VPN_NAT_RULE
+        fi
+    fi
+
     for _set in $IPT_IPSETS
     do
         $IPTCMD -t "$IPT_TABLE" -A "$IPT_CHAIN" $IPT_IPSET_MSET "$_set" $IPT_IPSET_TARGET
@@ -233,6 +253,15 @@ RemIptRules () {
 
     $IPTCMD -t "$IPT_TABLE" -F "$IPT_CHAIN"
     $IPTCMD -t "$IPT_TABLE" -D "$IPT_FIRST_CHAIN" $IPT_FIRST_CHAIN_RULE
+
+    ### Проксификация трафика локальных клиентов
+    if [ "$PROXY_LOCAL_CLIENTS" = "1" ]; then
+        $IPTCMD -t "$IPT_TABLE" -D OUTPUT $IPT_OUTPUT_FIRST_RULE
+        if [ "$PROXY_MODE" = "2" -a -n "$WAN_IP" ]; then
+            $IPTCMD -t nat -D POSTROUTING $VPN_NAT_RULE
+        fi
+    fi
+
     $IPTCMD -t "$IPT_TABLE" -X "$IPT_CHAIN"
 
 }
