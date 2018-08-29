@@ -35,7 +35,7 @@ PROXY_LOCAL_CLIENTS=1
 VPN_PKTS_MARK=1
 ### VPN интерфейс для правил iptables
 IF_VPN="tun0"
-### Режим полного прокси при старте скрипта (0 - off, 1 - on). Если 1, то весь трафик всегда идёт через прокси. Все пакеты попадающие в цепочку $IPT_CHAIN попадают в tor или VPN, за исключением сетей из $TOTAL_PROXY_EXCLUDE_NETS. Списки блокировок не используются для фильтрации
+### Режим полного прокси при старте скрипта (0 - off, 1 - on). Если 1, то весь трафик всегда идёт через прокси. Все пакеты попадающие в цепочку $IPT_CHAIN попадают в tor или VPN, за исключением сетей из $TOTAL_PROXY_EXCLUDE_NETS. Списки блокировок не используются для фильтрации. Работает только при PROXY_LOCAL_CLIENTS=0
 DEF_TOTAL_PROXY=0
 ### Трафик в заданные сети идет напрямую, не попадая в tor или VPN, в режиме total-proxy
 TOTAL_PROXY_EXCLUDE_NETS="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
@@ -212,13 +212,27 @@ FillTotalProxySet () {
 
 TotalProxyOn () {
 
-    $IPTCMD -t "$IPT_TABLE" -I "$IPT_CHAIN" 1 $IPT_TP_RULE
+    if [ "$PROXY_LOCAL_CLIENTS" != "1" ]; then
+        $IPTCMD -t "$IPT_TABLE" -I "$IPT_CHAIN" 1 $IPT_TP_RULE
+        if [ $? -eq 0 ]; then
+            echo " ${IPSET_TOTAL_PROXY} enabled"
+            MakeLogRecord "${IPSET_TOTAL_PROXY} enabled"
+        fi
+    fi
 
 }
 
 TotalProxyOff () {
 
-    $IPTCMD -t "$IPT_TABLE" -D "$IPT_CHAIN" $IPT_TP_RULE
+    if [ "$PROXY_LOCAL_CLIENTS" != "1" ]; then
+        $IPTCMD -t "$IPT_TABLE" -D "$IPT_CHAIN" $IPT_TP_RULE
+        if [ $? -ne 0 ]; then
+            echo " ${IPSET_TOTAL_PROXY} is already disabled" >&2
+        else
+            echo " ${IPSET_TOTAL_PROXY} disabled"
+            MakeLogRecord "${IPSET_TOTAL_PROXY} disabled"
+        fi
+    fi
 
 }
 
@@ -446,14 +460,8 @@ Update () {
 
 Start () {
 
-    local _total_proxy="disabled"
-
-    if [ "$DEF_TOTAL_PROXY" = "1" ]; then
-        _total_proxy="enabled"
-    fi
-
-    echo " ${NAME} ${1} (${IPSET_TOTAL_PROXY}: ${_total_proxy})..."
-    MakeLogRecord "${1} (${IPSET_TOTAL_PROXY}: ${_total_proxy})..."
+    echo " ${NAME} ${1}..."
+    MakeLogRecord "${1}..."
     DropNetConfig &> /dev/null
     SetNetConfig
     PreStartCheck
@@ -644,27 +652,11 @@ case "$1" in
     ;;
     total-proxy-on)
         TotalProxyOff &> /dev/null
-        TotalProxyOn &> /dev/null
-
-        if [ $? -eq 0 ]; then
-            echo " ${IPSET_TOTAL_PROXY} enabled"
-            MakeLogRecord "${IPSET_TOTAL_PROXY} enabled"
-        else
-            echo " ${NAME} is off..." >&2
-        fi
-
+        TotalProxyOn
         Status html
     ;;
     total-proxy-off)
-        TotalProxyOff &> /dev/null
-
-        if [ $? -ne 0 ]; then
-            echo " ${IPSET_TOTAL_PROXY} is already disabled" >&2
-        else
-            echo " ${IPSET_TOTAL_PROXY} disabled"
-            MakeLogRecord "${IPSET_TOTAL_PROXY} disabled"
-        fi
-
+        TotalProxyOff
         Status html
     ;;
     status)
