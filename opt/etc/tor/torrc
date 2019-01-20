@@ -8,4 +8,8 @@ TransPort 127.0.0.1:9040
 DNSPort 9053
 DNSListenAddress 127.0.0.1
 #SOCKSPort 192.168.1.1:9050         # Адрес tor socks proxy в LAN для подключения браузера и пр.
-ExcludeExitNodes {ru}               # Исключение российских исходящих нодов
+GeoIPFile /opt/share/tor/geoip
+GeoIPv6File /opt/share/tor/geoip6
+ExcludeExitNodes {RU},{UA},{BY},{KZ},{MD},{TM},{UZ},{AM},{KG}
+ExitPolicy reject *:*
+ExitPolicy reject6 *:*
