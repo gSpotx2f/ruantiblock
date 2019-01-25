@@ -9,12 +9,13 @@
 #  http://api.antizapret.info/group.php?data=domain
 #  http://api.antizapret.info/all.php?type=csv
 #  http://api.reserve-rbl.ru/api/current
+#  https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
 #
 ########################################################################
 
 ############################## Settings ################################
 
-### Тип обновления списка блокировок (antizapret, rublacklist)
+### Тип обновления списка блокировок (antizapret, rublacklist, zapret-info)
 export BL_UPDATE_MODE="antizapret"
 ### Режим обхода блокировок: ip (если провайдер блокирует по ip), hybrid (если провайдер использует DPI, подмену DNS и пр.), fqdn (если провайдер использует DPI, подмену DNS и пр.)
 export BLOCK_MODE="hybrid"
@@ -33,7 +34,7 @@ export OPT_EXCLUDE_3LD_REGEXP=0
 ### Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
 export SD_LIMIT=16
 ### В случае если из источника получено менее указанного кол-ва записей, то обновления списков не происходит
-export BLLIST_MIN_ENTRS=1000
+export BLLIST_MIN_ENTRS=30000
 ### Обрезка www[0-9]. в FQDN (0 - off, 1 - on)
 export STRIP_WWW=1
 
@@ -49,7 +50,7 @@ if [ $? -ne 0 ]; then
     echo " Error! Wget doesn't exists" >&2
     exit 1
 fi
-WGET_PARAMS="-q -O -"
+WGET_PARAMS="--no-check-certificate -q -O -"
 IDN_CMD=`which idn`
 if [ $USE_IDN = "1" -a $? -ne 0 ]; then
     echo " Idn doesn't exists" >&2
@@ -70,6 +71,7 @@ AZ_IP_URL="http://api.antizapret.info/group.php?data=ip"
 AZ_FQDN_URL="http://api.antizapret.info/group.php?data=domain"
 #RBL_ALL_URL="http://reestr.rublacklist.net/api/current"
 RBL_ALL_URL="http://api.reserve-rbl.ru/api/current"
+ZI_ALL_URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
 
 ############################## Functions ###############################
 
@@ -99,6 +101,10 @@ GetAntizapret () {
 
 GetRublacklist () {
     DlRun "$RBL_ALL_URL"
+}
+
+GetZapretinfo () {
+    DlRun "$ZI_ALL_URL"
 }
 
 MakeDataFiles () {
@@ -197,7 +203,7 @@ MakeDataFiles () {
         (ENVIRON["BL_UPDATE_MODE"] != "rublacklist") || ($0 ~ /^n/) {
             ip_string=""; fqdn_string="";
             split($0, string_array, ";")
-            if(ENVIRON["BL_UPDATE_MODE"] == "rublacklist") {
+            if(ENVIRON["BL_UPDATE_MODE"] == "rublacklist" || ENVIRON["BL_UPDATE_MODE"] == "zapret-info") {
                 ip_string=string_array[1];
                 fqdn_string=string_array[2];
                 gsub(/[ n]/, "", ip_string);
@@ -284,6 +290,9 @@ MakeDataFiles () {
 case $BL_UPDATE_MODE in
     "rublacklist")
         GetRublacklist | MakeDataFiles
+    ;;
+    "zapret-info")
+        GetZapretinfo | MakeDataFiles
     ;;
     *)
         GetAntizapret | MakeDataFiles

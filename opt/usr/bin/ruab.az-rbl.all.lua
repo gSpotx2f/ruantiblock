@@ -6,6 +6,7 @@
      http://api.antizapret.info/group.php?data=ip
      http://api.antizapret.info/group.php?data=domain
      http://api.reserve-rbl.ru/api/current
+     https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
 
 --]]
 
@@ -14,7 +15,7 @@ local NAME = "ruantiblock"
 ------------------------------ Settings --------------------------------
 
 local Config = {
-    -- Тип обновления списка блокировок (antizapret, rublacklist)
+    -- Тип обновления списка блокировок (antizapret, rublacklist, zapret-info)
     BL_UPDATE_MODE = "antizapret",
     -- Режим обхода блокировок: ip (если провайдер блокирует по ip), hybrid (если провайдер использует DPI, подмену DNS и пр.), fqdn (если провайдер использует DPI, подмену DNS и пр.)
     BLOCK_MODE = "hybrid",
@@ -48,14 +49,14 @@ local Config = {
     -- Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
     SD_LIMIT = 16,
     -- В случае если из источника получено менее указанного кол-ва записей, то обновления списков не происходит
-    BLLIST_MIN_ENTRS = 1000,
+    BLLIST_MIN_ENTRS = 30000,
     -- Обрезка www[0-9]. в FQDN (0 - off, 1 - on)
     STRIP_WWW = 1,
     -- Тип idn: внешняя утилита или библиотека lua-idn (standalone, lua)
     IDN_TYPE = "standalone",
     -- Внешняя утилита idn
     IDN_CMD = "idn",
-    WGET_CMD = "wget -q -O -",
+    WGET_CMD = "wget --no-check-certificate -q -O -",
     DATA_DIR = "/opt/var/" .. NAME,
     IPSET_DNSMASQ = NAME .. "-dnsmasq",
     IPSET_IP = NAME .. "-ip-tmp",
@@ -66,6 +67,7 @@ local Config = {
     AZ_FQDN_URL = "http://api.antizapret.info/group.php?data=domain",
     --RBL_ALL_URL = "http://reestr.rublacklist.net/api/current",
     RBL_ALL_URL = "https://api.reserve-rbl.ru/api/current",
+    ZI_ALL_URL = "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv",
     httpSendHeadersTable = {
         --["User-Agent"] = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:52.5) Gecko/20100101 Firefox/52.5",
     },
@@ -277,9 +279,9 @@ end
 
 function BlackListParser:getHttpData(url)
     local retVal
-    local output = ltn12.sink.chain(self:chunkBuffer(), self:sink())
     if http then
-        retVal, retCode, retHeaders = http.request{ url = url, sink = output, headers = self.httpSendHeadersTable }
+        local httpSink = ltn12.sink.chain(self:chunkBuffer(), self:sink())
+        retVal, retCode, retHeaders = http.request{ url = url, sink = httpSink, headers = self.httpSendHeadersTable }
         --[[
         for k, v in pairs(retHeaders) do
             print(k, v)
@@ -290,7 +292,11 @@ function BlackListParser:getHttpData(url)
             print(string.format("Connection error! (%s) URL: %s", retCode, url))
         end
     else
-        retVal = ltn12.pump.all(ltn12.source.file(io.popen(self.WGET_CMD .. " \"" .. url .. "\"", "r")), output)
+        retVal = nil
+    end
+    if not retVal then
+        local wgetSink = ltn12.sink.chain(self:chunkBuffer(), self:sink())
+        retVal = ltn12.pump.all(ltn12.source.file(io.popen(self.WGET_CMD .. " \"" .. url .. "\"", "r")), wgetSink)
     end
     return (retVal == 1) and true or false
 end
@@ -415,12 +421,24 @@ local RblIp = Class(Rbl, {
     sink = ipSink
 })
 
+    -- zapret-info
+
+local Zi = Class(Rbl, {
+    url = Config.ZI_ALL_URL,
+    recordsSeparator = "\n",
+    ipStringPattern = "([0-9%./ |]+);.-\n",
+})
+
+local ZiIp = Class(Zi, {
+    sink = ipSink
+})
+
 ------------------------------ Run section --------------------------------
 
 local ctxTable = {
-    ["ip"] = {["antizapret"] = AzIp, ["rublacklist"] = RblIp},
-    ["fqdn"] = {["antizapret"] = AzFqdn, ["rublacklist"] = Rbl},
-    ["hybrid"] = {["antizapret"] = Az, ["rublacklist"] = Rbl},
+    ["ip"] = {["antizapret"] = AzIp, ["rublacklist"] = RblIp, ["zapret-info"] = ZiIp},
+    ["fqdn"] = {["antizapret"] = AzFqdn, ["rublacklist"] = Rbl, ["zapret-info"] = Zi},
+    ["hybrid"] = {["antizapret"] = Az, ["rublacklist"] = Rbl, ["zapret-info"] = Zi},
 }
 
 local returnCode = 1

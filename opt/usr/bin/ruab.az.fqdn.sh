@@ -25,7 +25,7 @@ export OPT_EXCLUDE_3LD_REGEXP=0
 ### Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
 export SD_LIMIT=16
 ### В случае если из источника получено менее указанного кол-ва записей, то обновления списков не происходит
-export BLLIST_MIN_ENTRS=1000
+export BLLIST_MIN_ENTRS=30000
 ### Обрезка www[0-9]. в FQDN (0 - off, 1 - on)
 export STRIP_WWW=1
 
@@ -41,7 +41,7 @@ if [ $? -ne 0 ]; then
     echo " Error! Wget doesn't exists" >&2
     exit 1
 fi
-WGET_PARAMS="-q -O -"
+WGET_PARAMS="--no-check-certificate -q -O -"
 IDN_CMD=`which idn`
 if [ $USE_IDN = "1" -a $? -ne 0 ]; then
     echo " Idn doesn't exists" >&2
