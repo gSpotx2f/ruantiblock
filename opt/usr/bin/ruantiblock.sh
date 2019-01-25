@@ -411,8 +411,9 @@ GetDataFiles () {
 
 Update () {
     local _return_code=0
-    CheckStatus ipsets
-    if [ $? -ne 0 ]; then
+    if CheckStatus ipsets; then
+        :
+    else
         echo " ${NAME} ${1} - Error! ${NAME} does not running or another error has occurred" >&2
         return 1
     fi
@@ -472,8 +473,7 @@ RenewIpt () {
 Status () {
     local _set
     local _call_iptables="${IPT_CMD} -t ${IPT_TABLE} -v -L ${IPT_CHAIN}"
-    CheckStatus
-    if [ $? -eq 0 ]; then
+    if CheckStatus; then
         printf "\n \033[1m${NAME} status\033[m: \033[1;32mActive\033[m\n\n  PROXY_MODE: ${PROXY_MODE}\n  DEF_TOTAL_PROXY: ${DEF_TOTAL_PROXY}\n  BLLIST_MODULE_CMD: ${BLLIST_MODULE_CMD}\n"
         if [ -f "$UPDATE_STATUS_FILE" ]; then
             $AWK_CMD '{
@@ -533,8 +533,7 @@ span.info_label { display: block; padding: 0px 0px 10px 0px }
 </head><body>
 <div id="main_layout">
 EOF
-        CheckStatus
-        if [ $? -eq 0 ]; then
+        if CheckStatus; then
             printf "<div class=\"main\"><table class=\"info_table\">\n\
             <tr class=\"list\"><td align=\"left\">Last status update at:</td><td align=\"left\">`date`</td></tr>\n\
             <tr class=\"list green\"><td align=\"left\">${NAME} status:</td><td align=\"left\">Active</td></tr>\n\
