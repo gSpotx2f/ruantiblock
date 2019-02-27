@@ -11,6 +11,7 @@
 --]]
 
 local NAME = "ruantiblock"
+local CONFIG_FILE = "/opt/etc/ruantiblock/ruantiblock.conf"
 
 ------------------------------ Settings --------------------------------
 
@@ -25,10 +26,6 @@ local Config = {
     ALT_DNS_ADDR = "8.8.8.8",
     -- Преобразование кириллических доменов в punycode (0 - off, 1 - on)
     USE_IDN = 0,
-    -- Записи (ip, CIDR, FQDN) исключаемые из списка блокировки
-    EXCLUDE_ENTRIES = {
-        ["youtube.com"] = true,
-    },
     -- SLD не подлежащие оптимизации
     OPT_EXCLUDE_SLD = {
         ["livejournal.com"] = true,
@@ -46,8 +43,23 @@ local Config = {
     },
     -- Не оптимизировать SLD попадающие под выражения из таблицы
     OPT_EXCLUDE_MASKS = {},     -- { "^%a%a%a?.%a%a$" },
+    -- Фильтрация записей блэклиста по шаблонам из файла ENTRIES_FILTER_FILE. Записи (ip, CIDR, FQDN) попадающие под шаблоны исключаются из кофигов ipset и dnsmasq (0 - off, 1 - on)
+    ENTRIES_FILTER = 1,
+    -- Файл с шаблонами для опции ENTRIES_FILTER (каждый шаблон в отдельной строке. # в первом символе строки - комментирует строку)
+    ENTRIES_FILTER_FILE = "/opt/etc/ruantiblock/ruab_entries_filter",
+    -- Стандартные шаблоны для опции ENTRIES_FILTER. Добавляются к шаблонам из файла ENTRIES_FILTER_FILE (также применяются при отсутствии ENTRIES_FILTER_FILE)
+    ENTRIES_FILTER_PATTERNS = {
+        ["^youtube[.]com"] = true,
+    },
     -- Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
     SD_LIMIT = 16,
+    -- Лимит ip адресов. При достижении, в конфиг ipset будет добавлена вся подсеть /24 вместо множества ip-адресов пренадлежащих этой сети (0 - off)
+    IP_LIMIT = 10,
+    -- Подсети класса C (/24). Ip-адреса из этих подсетей не группируются при оптимизации (записи д.б. в виде: 68.183.221. 149.154.162. и пр.)
+    OPT_EXCLUDE_NETS = {
+        --["68.183.221."] = true,
+        --["149.154.162."] = true,
+    },
     -- В случае если из источника получено менее указанного кол-ва записей, то обновления списков не происходит
     BLLIST_MIN_ENTRS = 30000,
     -- Обрезка www[0-9]. в FQDN (0 - off, 1 - on)
@@ -74,6 +86,32 @@ local Config = {
 }
 Config.__index = Config
 Config.__call = true
+
+-- External config
+
+function Config:loadExternalConfig()
+    local configArrays = {["ENTRIES_FILTER_PATTERNS"] = true, ["OPT_EXCLUDE_SLD"] = true, ["OPT_EXCLUDE_NETS"] = true,}
+    local fileHandler = io.open(CONFIG_FILE, "r")
+    if fileHandler then
+        for line in fileHandler:lines() do
+            local var, val = line:match("^([a-zA-Z0-9_%-]+)%=([^#]+)")
+            if var then
+                if configArrays[var] then
+                    local valueTable = {}
+                    for v in val:gmatch('[^" ]+') do
+                        valueTable[v] = true
+                    end
+                    self[var] = valueTable
+                else
+                    self[var] = val:match("^[0-9.]+$") and tonumber(val) or val:gsub('"', '')
+                end
+            end
+        end
+        fileHandler:close()
+    end
+end
+
+Config:loadExternalConfig()
 Config.DNSMASQ_DATA_FILE = Config.DATA_DIR .. "/" .. NAME .. ".dnsmasq"
 Config.IP_DATA_FILE = Config.DATA_DIR .. "/" .. NAME .. ".ip"
 Config.UPDATE_STATUS_FILE = Config.DATA_DIR .. "/update_status"
@@ -85,6 +123,23 @@ end
 Config.ALT_NSLOOKUP = remapBool(Config.ALT_NSLOOKUP)
 Config.USE_IDN = remapBool(Config.USE_IDN)
 Config.STRIP_WWW = remapBool(Config.STRIP_WWW)
+Config.ENTRIES_FILTER = remapBool(Config.ENTRIES_FILTER)
+
+function Config:loadEntriesFilter()
+    if self.ENTRIES_FILTER then
+        local fileHandler = io.open(self.ENTRIES_FILTER_FILE, "r")
+        if fileHandler then
+            for line in fileHandler:lines() do
+                if #line > 0 and line:match("^[^#]") then
+                    self.ENTRIES_FILTER_PATTERNS[line] = true
+                end
+            end
+            fileHandler:close()
+        end
+    end
+end
+
+Config:loadEntriesFilter()
 
 -- Import packages
 
@@ -102,6 +157,7 @@ if Config.USE_IDN and Config.IDN_TYPE == "lua" and not idn then
 end
 
 local http = prequire("socket.http")
+local https = prequire("ssl.https")
 local ltn12 = prequire("ltn12")
 if not ltn12 then
     error("You need to install ltn12...")
@@ -111,14 +167,14 @@ end
 
 -- Constructor
 
-function Class(super, t)
+local function Class(super, t)
+    local class = t or {}
     local function instanceConstructor(cls, t)
         local instance = t or {}
         setmetatable(instance, cls)
         instance.__class = cls
         return instance
     end
-    local class = t or {}
     if not super then
         local mt = {__call = instanceConstructor}
         mt.__index = mt
@@ -142,19 +198,27 @@ local BlackListParser = Class(Config, {
     fqdnPattern = "[a-z0-9_%.%-]-[a-z0-9_%-]+%.[a-z0-9%.%-]",
     url = "http://127.0.0.1",
     recordsSeparator = "\n",
+    fildsSeparator = ";",
+    ipsSeparator = ",",
 })
 
 function BlackListParser:new(t)
     -- extended instance constructor
     local instance = self(t)
     instance.url = instance["url"] or self.url
+    instance.fildsSeparator = instance["fildsSeparator"] or self.fildsSeparator
     instance.recordsSeparator = instance["recordsSeparator"] or self.recordsSeparator
+    instance.ipsSeparator = instance["ipsSeparator"] or self.ipsSeparator
+    instance.ipRecordsCount = 0
     instance.ipCount = 0
+    instance.ipSubnetTable = {}
     instance.cidrCount = 0
-    instance.fqdn = {}
-    instance.sdCount = {}
-    instance.ip = {}
-    instance.cidr = {}
+    instance.fqdnTable = {}
+    instance.fqdnCount = 0
+    instance.sldTable = {}
+    instance.fqdnRecordsCount = 0
+    instance.ipTable = {}
+    instance.cidrTable = {}
     return instance
 end
 
@@ -172,30 +236,44 @@ function BlackListParser:convertToPunycode(input)
     return (output)
 end
 
-function BlackListParser:fillIpTable(val, tname)
-    if not self.EXCLUDE_ENTRIES[val] and not self[tname][val] then
-        self[tname][val] = true
-        local counter = tname .. "Count"
-        self[counter] = self[counter] + 1
+function BlackListParser:checkEntriesFilter(str)
+    if self.ENTRIES_FILTER and self.ENTRIES_FILTER_PATTERNS and str then
+        for pattern in pairs(self.ENTRIES_FILTER_PATTERNS) do
+            if str:match(pattern) then
+                return true
+            end
+        end
     end
+    return false
 end
 
 function BlackListParser:fillDomainTables(val)
     if self.STRIP_WWW then val = val:gsub("^www[0-9]?%.", "") end
-    local subDomain, secondLevelDomain = val:match("^([a-z0-9_%.%-]-)([a-z0-9_%-]+%.[a-z0-9%-]+)$")
-    if secondLevelDomain then
-        self.fqdn[val] = secondLevelDomain
-        self.sdCount[secondLevelDomain] = (self.sdCount[secondLevelDomain] or 0) + 1
+    if not self:checkEntriesFilter(val) then
+        local secondLevelDomain = val:match("^[a-z0-9_%.%-]-([a-z0-9_%-]+%.[a-z0-9%-]+)$")
+        if secondLevelDomain and (self.OPT_EXCLUDE_SLD[secondLevelDomain] or ((not self.SD_LIMIT or self.SD_LIMIT == 0) or (not self.sldTable[secondLevelDomain] or self.sldTable[secondLevelDomain] < self.SD_LIMIT))) then
+            self.fqdnTable[val] = secondLevelDomain
+            self.sldTable[secondLevelDomain] = (self.sldTable[secondLevelDomain] or 0) + 1
+            self.fqdnCount = self.fqdnCount + 1
+        end
     end
 end
 
-function BlackListParser:parseIpString(val)
+function BlackListParser:fillIpTables(val)
     if val and val ~= "" then
-        for ipEntry in val:gmatch("[0-9][0-9%./]+[0-9]") do
-            if ipEntry:match("^" .. self.ipPattern .. "$") then
-                self:fillIpTable(ipEntry, "ip")
-            elseif ipEntry:match("^" .. self.cidrPattern .. "$") then
-                self:fillIpTable(ipEntry, "cidr")
+        if not self:checkEntriesFilter(val) then
+            for ipEntry in val:gmatch(self.ipPattern .. "/?%d?%d?") do
+                if ipEntry:match("^" .. self.ipPattern .. "$") and not self.ipTable[ipEntry] then
+                    local subnet = ipEntry:match("^(%d+%.%d+%.%d+%.)%d+$")
+                    if subnet and (self.OPT_EXCLUDE_NETS[subnet] or ((not self.IP_LIMIT or self.IP_LIMIT == 0) or (not self.ipSubnetTable[subnet] or self.ipSubnetTable[subnet] < self.IP_LIMIT))) then
+                        self.ipTable[ipEntry] = subnet
+                        self.ipSubnetTable[subnet] = (self.ipSubnetTable[subnet] or 0) + 1
+                        self.ipCount = self.ipCount + 1
+                    end
+                elseif ipEntry:match("^" .. self.cidrPattern .. "$") and not self.cidrTable[ipEntry] then
+                    self.cidrTable[ipEntry] = true
+                    self.cidrCount = self.cidrCount + 1
+                end
             end
         end
     end
@@ -206,50 +284,64 @@ function BlackListParser:sink()
     error("Method BlackListParser:sink() must be reload in the subclass!")
 end
 
-function BlackListParser:compactDomainList(fqdnList, sdCountList)
-    local domainTable = {}
-    local numEntries = 0
+function BlackListParser:makeDnsmasqConfig()
+    local configFile = assert(io.open(self.DNSMASQ_DATA_FILE, "w"), "Could not open dnsmasq config")
+    configFile:setvbuf("no")
     if self.OPT_EXCLUDE_MASKS and #self.OPT_EXCLUDE_MASKS > 0 then
-        for sld in pairs(sdCountList) do
+        for sld in pairs(self.sldTable) do
             for _, pattern in ipairs(self.OPT_EXCLUDE_MASKS) do
                 if sld:find(pattern) then
-                    sdCountList[sld] = 0
+                    self.sldTable[sld] = 0
                     break
                 end
             end
         end
     end
-    for fqdn, sld in pairs(fqdnList) do
-        if not fqdnList[sld] or fqdn == sld then
-            local keyValue = ((self.SD_LIMIT and self.SD_LIMIT > 0 and not self.OPT_EXCLUDE_SLD[sld]) and sdCountList[sld] >= self.SD_LIMIT) and sld or fqdn
-            if not self.EXCLUDE_ENTRIES[keyValue] and not domainTable[keyValue] then
-                domainTable[keyValue] = true
-                numEntries = numEntries + 1
+    for fqdn, sld in pairs(self.fqdnTable) do
+        local keyValue = fqdn
+        if (not self.fqdnTable[sld] or fqdn == sld) and self.sldTable[sld] then
+            if (self.SD_LIMIT and self.SD_LIMIT > 0 and not self.OPT_EXCLUDE_SLD[sld]) and self.sldTable[sld] >= self.SD_LIMIT then
+                keyValue = sld
+                self.sldTable[sld] = nil
             end
+            if self.ALT_NSLOOKUP then
+                configFile:write(string.format("server=/%s/%s\n", keyValue, self.ALT_DNS_ADDR))
+            end
+            configFile:write(string.format("ipset=/%s/%s\n", keyValue, self.IPSET_DNSMASQ))
+            self.fqdnRecordsCount = self.fqdnRecordsCount + 1
         end
-    end
-    return domainTable, numEntries
-end
-
-function BlackListParser:generateDnsmasqConfig(configPath, domainList)
-    local configFile = assert(io.open(configPath, "w"), "Could not open dnsmasq config")
-    for fqdn in pairs(domainList) do
-        if self.ALT_NSLOOKUP then
-            configFile:write(string.format("server=/%s/%s\n", fqdn, self.ALT_DNS_ADDR))
-        end
-        configFile:write(string.format("ipset=/%s/%s\n", fqdn, self.IPSET_DNSMASQ))
     end
     configFile:close()
 end
 
-function BlackListParser:generateIpsetConfig(configPath, t)
-    local configFile = assert(io.open(configPath, "w"), "Could not open ipset config")
-    for k, v in pairs(t) do
-        for ipaddr in pairs(v) do
-            configFile:write(string.format("add %s %s\n", k, ipaddr))
+function BlackListParser:makeIpsetConfig()
+    local configFile = assert(io.open(self.IP_DATA_FILE, "w"), "Could not open ipset config")
+    configFile:setvbuf("no")
+    for ipaddr, subnet in pairs(self.ipTable) do
+        local keyValue, ipset
+        if self.ipSubnetTable[subnet] then
+            if (self.IP_LIMIT and self.IP_LIMIT > 0 and not self.OPT_EXCLUDE_NETS[subnet]) and self.ipSubnetTable[subnet] >= self.IP_LIMIT then
+                keyValue, ipset = string.format("%s0/24", subnet), self.IPSET_CIDR
+                self.ipSubnetTable[subnet] = nil
+                self.cidrCount = self.cidrCount + 1
+                self.cidrTable[keyValue] = nil
+            else
+                keyValue, ipset = ipaddr, self.IPSET_IP
+                self.ipRecordsCount = self.ipRecordsCount + 1
+            end
+            configFile:write(string.format("add %s %s\n", ipset, keyValue))
         end
     end
+    for cidr in pairs(self.cidrTable) do
+        configFile:write(string.format("add %s %s\n", self.IPSET_CIDR, cidr))
+    end
     configFile:close()
+end
+
+function BlackListParser:makeUpdateStatus()
+    local updateStatusFile = assert(io.open(self.UPDATE_STATUS_FILE, "w"), "Could not open 'update_status' file")
+    updateStatusFile:write(string.format("%d %d %d", self.ipRecordsCount, self.cidrCount, self.fqdnRecordsCount))
+    updateStatusFile:close()
 end
 
 function BlackListParser:chunkBuffer()
@@ -279,9 +371,10 @@ end
 
 function BlackListParser:getHttpData(url)
     local retVal
-    if http then
+    local httpModule = url:match("^https") and https or http
+    if httpModule then
         local httpSink = ltn12.sink.chain(self:chunkBuffer(), self:sink())
-        retVal, retCode, retHeaders = http.request{ url = url, sink = httpSink, headers = self.httpSendHeadersTable }
+        retVal, retCode, retHeaders = httpModule.request{url = url, sink = httpSink, headers = self.httpSendHeadersTable}
         --[[
         for k, v in pairs(retHeaders) do
             print(k, v)
@@ -291,8 +384,6 @@ function BlackListParser:getHttpData(url)
             retVal = nil
             print(string.format("Connection error! (%s) URL: %s", retCode, url))
         end
-    else
-        retVal = nil
     end
     if not retVal then
         local wgetSink = ltn12.sink.chain(self:chunkBuffer(), self:sink())
@@ -302,14 +393,11 @@ function BlackListParser:getHttpData(url)
 end
 
 function BlackListParser:run()
-    local domainTable
-    local recordsNum = 0
     local returnCode = 0
     if self:getHttpData(self.url) then
-        domainTable, recordsNum = self:compactDomainList(self.fqdn, self.sdCount)
-        if (recordsNum + self.ipCount + self.cidrCount) > self.BLLIST_MIN_ENTRS then
-            self:generateDnsmasqConfig(self.DNSMASQ_DATA_FILE, domainTable)
-            self:generateIpsetConfig(self.IP_DATA_FILE, { [self.IPSET_IP] = self.ip, [self.IPSET_CIDR] = self.cidr })
+        if (self.fqdnCount + self.ipCount + self.cidrCount) > self.BLLIST_MIN_ENTRS then
+            self:makeDnsmasqConfig()
+            self:makeIpsetConfig()
             returnCode = 0
         else
             returnCode = 2
@@ -317,10 +405,7 @@ function BlackListParser:run()
     else
         returnCode = 1
     end
-    -- update_status
-    local updateStatusFile = assert(io.open(self.UPDATE_STATUS_FILE, "w"), "Could not open 'update_status' file")
-    updateStatusFile:write(string.format("%d %d %d", self.ipCount, self.cidrCount, recordsNum))
-    updateStatusFile:close()
+    self:makeUpdateStatus()
     return returnCode
 end
 
@@ -330,7 +415,7 @@ function ipSink(self)
     return function(chunk)
         if chunk and chunk ~= "" then
             for ipString in chunk:gmatch(self.ipStringPattern) do
-                self:parseIpString(ipString)
+                self:fillIpTables(ipString)
             end
         end
         return true
@@ -359,7 +444,7 @@ function Az:sink()
                         self:fillDomainTables(fqdnStr)
                     end
                 elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
-                    self:parseIpString(ipStr)
+                    self:fillIpTables(ipStr)
                 end
             end
         end
@@ -381,6 +466,7 @@ local AzIp = Class(Az, {
 local Rbl = Class(BlackListParser, {
     url = Config.RBL_ALL_URL,
     recordsSeparator = "\\n",
+    ipsSeparator = " | ",
     ipStringPattern = "([0-9%./ |]+);.-\\n",
     unicodeHexPattern = "\\u(%x%x%x%x)",
 })
@@ -409,7 +495,7 @@ function Rbl:sink()
                         self:fillDomainTables(fqdnStr)
                     end
                 elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
-                    self:parseIpString(ipStr)
+                    self:fillIpTables(ipStr)
                 end
             end
         end

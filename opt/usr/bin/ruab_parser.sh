@@ -25,14 +25,22 @@ export ALT_NSLOOKUP=1
 export ALT_DNS_ADDR="8.8.8.8"
 ### Преобразование кириллических доменов в punycode (0 - off, 1 - on)
 export USE_IDN=0
-### Записи (ip, CIDR, FQDN) исключаемые из списка блокировки (через пробел)
-export EXCLUDE_ENTRIES="youtube.com"
 ### SLD не подлежащие оптимизации (через пробел)
 export OPT_EXCLUDE_SLD="livejournal.com facebook.com vk.com blog.jp msk.ru net.ru org.ru net.ua com.ua org.ua co.uk amazonaws.com"
-### Не оптимизировать SLD содержащие поддомены типа subdomain.xx(x).xx (.msk.ru .net.ru .org.ru .net.ua .com.ua .org.ua .co.uk и т.п.) (0 - off, 1 - on)
-export OPT_EXCLUDE_3LD_REGEXP=0
+### Не оптимизировать SLD попадающие под выражения (через пробел)
+export OPT_EXCLUDE_MASKS=""     # "[.][a-z]{2,3}[.][a-z]{2}$"
+### Фильтрация записей блэклиста по шаблонам из файла ENTRIES_FILTER_FILE. Записи (ip, CIDR, FQDN) попадающие под шаблоны исключаются из кофигов ipset и dnsmasq (0 - off, 1 - on)
+export ENTRIES_FILTER=1
+### Файл с шаблонами для опции ENTRIES_FILTER (каждый шаблон в отдельной строке. # в первом символе строки - комментирует строку)
+export ENTRIES_FILTER_FILE="/opt/etc/ruantiblock/ruab_entries_filter"
+### Стандартные шаблоны для опции ENTRIES_FILTER (через пробел). Добавляются к шаблонам из файла ENTRIES_FILTER_FILE (также применяются при отсутствии ENTRIES_FILTER_FILE)
+export ENTRIES_FILTER_PATTERNS="^youtube[.]com"
 ### Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
 export SD_LIMIT=16
+### Лимит ip адресов. При достижении, в конфиг ipset будет добавлена вся подсеть /24 вместо множества ip-адресов пренадлежащих этой сети (0 - off)
+export IP_LIMIT=10
+### Подсети класса C (/24). Ip-адреса из этих подсетей не группируются при оптимизации (записи д.б. в виде: 68.183.221. 149.154.162. и пр.). Прим.: OPT_EXCLUDE_NETS="68.183.221. 149.154.162."
+export OPT_EXCLUDE_NETS=""
 ### В случае если из источника получено менее указанного кол-ва записей, то обновления списков не происходит
 export BLLIST_MIN_ENTRS=30000
 ### Обрезка www[0-9]. в FQDN (0 - off, 1 - on)
@@ -43,7 +51,22 @@ export STRIP_WWW=1
 export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
 export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
-### Необходим gawk. Ибо "облегчённый" mawk, похоже, не справляется с огромным кол-вом обрабатываемых записей и крашится с ошибками...
+export LANGUAGE="en"
+
+DATA_DIR="/opt/var/${NAME}"
+
+### Источники блэклиста
+AZ_ALL_URL="http://api.antizapret.info/all.php?type=csv"
+AZ_IP_URL="http://api.antizapret.info/group.php?data=ip"
+AZ_FQDN_URL="http://api.antizapret.info/group.php?data=domain"
+#RBL_ALL_URL="http://reestr.rublacklist.net/api/current"
+RBL_ALL_URL="http://api.reserve-rbl.ru/api/current"
+ZI_ALL_URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
+
+### External config
+CONFIG_FILE="/opt/etc/${NAME}/ruantiblock.conf"
+[ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+
 AWK_CMD="awk"
 WGET_CMD=`which wget`
 if [ $? -ne 0 ]; then
@@ -56,7 +79,6 @@ if [ $USE_IDN = "1" -a $? -ne 0 ]; then
     echo " Idn doesn't exists" >&2
     USE_IDN=0
 fi
-DATA_DIR="/opt/var/${NAME}"
 export DNSMASQ_DATA_FILE="${DATA_DIR}/${NAME}.dnsmasq"
 export IP_DATA_FILE="${DATA_DIR}/${NAME}.ip"
 export IPSET_IP="${NAME}-ip"
@@ -65,13 +87,6 @@ export IPSET_CIDR="${NAME}-cidr"
 export IPSET_CIDR_TMP="${IPSET_CIDR}-tmp"
 export IPSET_DNSMASQ="${NAME}-dnsmasq"
 export UPDATE_STATUS_FILE="${DATA_DIR}/update_status"
-### Источники блэклиста
-AZ_ALL_URL="http://api.antizapret.info/all.php?type=csv"
-AZ_IP_URL="http://api.antizapret.info/group.php?data=ip"
-AZ_FQDN_URL="http://api.antizapret.info/group.php?data=domain"
-#RBL_ALL_URL="http://reestr.rublacklist.net/api/current"
-RBL_ALL_URL="http://api.reserve-rbl.ru/api/current"
-ZI_ALL_URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
 
 ############################## Functions ###############################
 
@@ -109,11 +124,23 @@ GetZapretinfo () {
 
 MakeDataFiles () {
     local _return_code
-    $AWK_CMD -F ";" -v IDN_CMD="$IDN_CMD" '
+    $AWK_CMD -F ";" -v IDN_CMD="$IDN_CMD" -v ENTRIES_FILTER_FILE="$ENTRIES_FILTER_FILE" '
         BEGIN {
             ### Массивы из констант с исключениями
-            makeConstArray(ENVIRON["EXCLUDE_ENTRIES"], ex_entrs_array, " ");
+            makeConstArray(ENVIRON["OPT_EXCLUDE_MASKS"], ex_masks_array, " ");
             makeConstArray(ENVIRON["OPT_EXCLUDE_SLD"], ex_sld_array, " ");
+            makeConstArray(ENVIRON["ENTRIES_FILTER_PATTERNS"], remove_patterns_array, " ");
+            makeConstArray(ENVIRON["OPT_EXCLUDE_NETS"], ex_nets_array, " ");
+            ### Массив шаблонов из $ENTRIES_FILTER_FILE
+            null=0;
+            if(ENVIRON["ENTRIES_FILTER"] == 1) {
+                pattern="";
+                while((getline pattern <ENTRIES_FILTER_FILE) > 0){
+                    if(pattern ~ /^[^#]/)
+                        remove_patterns_array[pattern]=null;
+                };
+                close(ENTRIES_FILTER_FILE);
+            };
             total_ip=0; total_cidr=0; total_fqdn=0;
             ### Определение разделителя записей (строк)
             if(ENVIRON["BL_UPDATE_MODE"] == "rublacklist")
@@ -125,13 +152,15 @@ MakeDataFiles () {
         function makeConstArray(string, array, separator,  _split_array, _i) {
             split(string, _split_array, separator);
             for(_i in _split_array)
-                array[_split_array[_i]]="";
+                array[_split_array[_i]]=null;
         };
-        ### Проверка на повторы и добавление элемента в массив
-        function checkDuplicates(array, val) {
-            if(val in array) return 1;
-            else {
-                array[val]="";
+        ### Сопоставление с массивом рег.выражений
+        function checkExpr(val, array) {
+            if(ENVIRON["ENTRIES_FILTER"] == 1) {
+                for(pattern in array) {
+                    if(val ~ pattern)
+                        return 1;
+                };
                 return 0;
             };
         };
@@ -139,29 +168,30 @@ MakeDataFiles () {
         function getSld(val) {
             return substr(val, match(val, /[a-z0-9_-]+[.][a-z0-9-]+$/));
         };
-        ### Запись в $DNSMASQ_DATA_FILE
-        function writeDNSData(val) {
-            if(ENVIRON["ALT_NSLOOKUP"] == 1)
-                printf "server=/%s/%s\n", val, ENVIRON["ALT_DNS_ADDR"] > ENVIRON["DNSMASQ_DATA_FILE"];
-            printf "ipset=/%s/%s\n", val, ENVIRON["IPSET_DNSMASQ"] > ENVIRON["DNSMASQ_DATA_FILE"];
-        };
-        ### Запись в $IP_DATA_FILE
-        function writeIpsetEntries(array, set,  _i) {
-            for(_i in array)
-                printf "add %s %s\n", set, _i > ENVIRON["IP_DATA_FILE"];
+        ### Получение подсети из ip
+        function getSubnet(val) {
+            sub(/[0-9]{1,3}$/, "", val);
+            return val
         };
         ### Обработка ip и CIDR
-        function checkIp(val,  _val_array, _i) {
+        function checkIp(val,  _val_array, _i, _ip_entry, _subnet) {
             split(val, _val_array, /[|,]/);
             for(_i in _val_array) {
-                if(_val_array[_i] in ex_entrs_array) continue;
-                if(_val_array[_i] ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}[\057][0-9]{1,2}$/) {
-                    if(checkDuplicates(total_cidr_array, _val_array[_i]) == 0)
-                        total_cidr++;
+                _ip_entry=_val_array[_i]
+                if(checkExpr(_ip_entry, remove_patterns_array) == 1) continue;
+                if(_ip_entry ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}[\057][0-9]{1,2}$/ && !(_ip_entry in total_cidr_array)) {
+                    total_cidr_array[_ip_entry]=null;
+                    total_cidr++;
                 }
-                else if(_val_array[_i] ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}$/) {
-                    if(checkDuplicates(total_ip_array, _val_array[_i]) == 0)
+                else if(_ip_entry ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}$/ && !(_ip_entry in total_ip_array)) {
+                    _subnet=getSubnet(_ip_entry);
+                    if(_subnet in ex_nets_array || ENVIRON["IP_LIMIT"] == 0 || (subnet_array[_subnet] < ENVIRON["IP_LIMIT"])) {
+                        if(_subnet in subnet_array) subnet_array[_subnet]++;
+                        else subnet_array[_subnet]=1;
+                        total_ip_array[_ip_entry]=_subnet;
+                        #total_ip_array[_ip_entry]=null;
                         total_ip++;
+                    };
                 };
             };
             return counter;
@@ -171,30 +201,23 @@ MakeDataFiles () {
             sub(/[.]$/, "", val);
             sub(/^[\052][.]/, "", val);
             if(ENVIRON["STRIP_WWW"] == "1") sub(/^www[0-9]?[.]/, "", val);
-            if(val in ex_entrs_array) next;
             if(ENVIRON["USE_IDN"] == "1" && val !~ /^[a-z0-9._-]+[.]([a-z]{2,}|xn--[a-z0-9]+)$/ && val ~ /^([a-z0-9.-])*[^a-zA-Z.]+[.]([a-z]|[^a-z]){2,}$/) {
                 ### Кириллические FQDN кодируются $IDN_CMD в punycode ($AWK_CMD вызывает $IDN_CMD с параметром val, в отдельном экземпляре /bin/sh, далее STDOUT $IDN_CMD функцей getline помещается в val)
                 _call_idn=IDN_CMD" "val;
                 _call_idn | getline val;
                 close(_call_idn);
-            }
+            };
+            if(checkExpr(val, remove_patterns_array) == 1) next;
             ### Проверка на отсутствие лишних символов
             if(val ~ /^[a-z0-9._-]+[.]([a-z]{2,}|xn--[a-z0-9]+)$/) {
                 total_fqdn++;
                 ### SLD из FQDN
                 _sld=getSld(val);
-                ### Каждому SLD задается предельный лимит, чтобы далее исключить из очистки при сравнении с $SD_LIMIT
-                if(val == _sld)
-                    sld_array[val]=ENVIRON["SD_LIMIT"];
-                else {
-                ### Обработка остальных записей низших ур-ней
-                    ### Пропуск доменов 3-го ур-ня вида: subdomain.xx(x).xx
-                    if(ENVIRON["OPT_EXCLUDE_3LD_REGEXP"] == "1" && val ~ /[.][a-z]{2,3}[.][a-z]{2}$/)
-                        next;
+                if(_sld in ex_sld_array || (ENVIRON["SD_LIMIT"] == 0 || (sld_array[_sld] < ENVIRON["SD_LIMIT"]))) {
+                    ### Исключение доменов совпадающих с выражениями из $OPT_EXCLUDE_MASKS
+                    if(length(ex_masks_array) > 0 && checkExpr(val, ex_masks_array) == 1) next;
                     total_fqdn_array[val]=_sld;
-                    ### Исключение доменов не подлежащих оптимизации
-                    if(_sld in ex_sld_array) next;
-                    ### Если SLD (полученный из записи низшего ур-ня) уже обрабатывался ранее, то счетчик++, если нет, то добавляется элемент sld_array[SLD] и счетчик=1 (далее, если после обработки всех записей, счетчик >= $SD_LIMIT, то в итоговом выводе остается только запись SLD, а все записи низших ур-ней будут удалены)
+                    ### Если SLD уже обрабатывался ранее, то счетчик++, если нет, то добавляется элемент sld_array[SLD] и счетчик=1 (далее, если после обработки всех записей, счетчик >= $SD_LIMIT, то в итоговом выводе остается только запись SLD вместо записей низших ур-ней)
                     if(_sld in sld_array) sld_array[_sld]++;
                     else sld_array[_sld]=1;
                 };
@@ -219,7 +242,7 @@ MakeDataFiles () {
                 else
                     ip_string=string_array[1];
             };
-            ### В случае, если запись реестра не содержит FQDN, то при $BLOCK_MODE="hybrid" в $IP_DATA_FILE добавляются найденные в записи ip и CIDR-подсети (после проверки на повторы)
+            ### В случае, если запись реестра не содержит FQDN, то при $BLOCK_MODE="hybrid" в $IP_DATA_FILE добавляются найденные в записи ip и CIDR-подсети
             if(ENVIRON["BLOCK_MODE"] == "hybrid") {
                 if(length(fqdn_string) > 0 && fqdn_string !~ /^[0-9]{1,3}([.][0-9]{1,3}){3}$/) {
                     checkFQDN(fqdn_string);
@@ -244,42 +267,57 @@ MakeDataFiles () {
             delete string_array;
         }
         END {
-            output_fqdn=0; exit_code=0;
+            output_fqdn=0; output_ip=0; exit_code=0;
             ### Если кол-во обработанных записей менее $BLLIST_MIN_ENTRS, то код завершения 2
             if((total_ip + total_cidr + total_fqdn) < ENVIRON["BLLIST_MIN_ENTRS"])
                 exit_code=2;
             else {
                 ### Запись в $IP_DATA_FILE ip-адресов и подсетей CIDR
                 system("rm -f \"" ENVIRON["IP_DATA_FILE"] "\"");
-                writeIpsetEntries(total_ip_array, ENVIRON["IPSET_IP_TMP"]);
-                writeIpsetEntries(total_cidr_array, ENVIRON["IPSET_CIDR_TMP"]);
+                ### Оптимизация ip-адресов и запись в $IP_DATA_FILE
+                for(ip in total_ip_array) {
+                    subnet=total_ip_array[ip];
+                    #subnet=getSubnet(ip);
+                    if(subnet in subnet_array) {
+                        if(ENVIRON["IP_LIMIT"] > 0 && !(subnet in ex_nets_array) && (subnet_array[subnet] >= ENVIRON["IP_LIMIT"])) {
+                            value=subnet"0/24";
+                            ipset=ENVIRON["IPSET_CIDR_TMP"];
+                            delete subnet_array[subnet];
+                            total_cidr++;
+                            delete total_cidr_array[value]
+                        }
+                        else {
+                            value=ip;
+                            ipset=ENVIRON["IPSET_IP_TMP"];
+                            output_ip++;
+                        };
+                        printf "add %s %s\n", ipset, value > ENVIRON["IP_DATA_FILE"];
+                    };
+                };
+                ### Запись в $IP_DATA_FILE подсетей CIDR
+                for(_i in total_cidr_array)
+                    printf "add %s %s\n", ENVIRON["IPSET_CIDR_TMP"], _i > ENVIRON["IP_DATA_FILE"];
                 ### Оптимизация отобранных FQDN и запись в $DNSMASQ_DATA_FILE
                 system("rm -f \"" ENVIRON["DNSMASQ_DATA_FILE"] "\"");
                 if(ENVIRON["BLOCK_MODE"] == "hybrid" || ENVIRON["BLOCK_MODE"] == "fqdn") {
-                    ### Чистка sld_array[] от тех SLD, которые встречались при обработке менее $SD_LIMIT (остаются только достигнувшие $SD_LIMIT) и добавление их в $DNSMASQ_DATA_FILE (вместо исключаемых далее субдоменов достигнувших $SD_LIMIT)
-                    if(ENVIRON["SD_LIMIT"] > 1) {
-                        for(j in sld_array) {
-                            if(sld_array[j] < ENVIRON["SD_LIMIT"])
-                                delete sld_array[j];
-                            else {
-                                output_fqdn++;
-                                writeDNSData(j);
+                    for(fqdn in total_fqdn_array) {
+                        sld=total_fqdn_array[fqdn];
+                        keyValue=fqdn;
+                        if((!(sld in total_fqdn_array) || fqdn == sld) && sld in sld_array) {
+                            if(ENVIRON["SD_LIMIT"] > 0 && !(sld in ex_sld_array) && (sld_array[sld] >= ENVIRON["SD_LIMIT"])) {
+                                keyValue=sld;
+                                delete sld_array[sld];
                             };
-                        };
-                    };
-                    ### Запись из total_fqdn_array[] в $DNSMASQ_DATA_FILE с исключением всех SLD присутствующих в sld_array[] и их субдоменов (если ENVIRON["SD_LIMIT"] > 1)
-                    for(k in total_fqdn_array) {
-                        if(ENVIRON["SD_LIMIT"] > 1 && total_fqdn_array[k] in sld_array)
-                            continue;
-                        else {
+                            if(ENVIRON["ALT_NSLOOKUP"] == 1)
+                                printf "server=/%s/%s\n", keyValue, ENVIRON["ALT_DNS_ADDR"] > ENVIRON["DNSMASQ_DATA_FILE"];
+                            printf "ipset=/%s/%s\n", keyValue, ENVIRON["IPSET_DNSMASQ"] > ENVIRON["DNSMASQ_DATA_FILE"];
                             output_fqdn++;
-                            writeDNSData(k);
                         };
                     };
                 };
             };
             ### Запись в $UPDATE_STATUS_FILE
-            printf "%s %s %s", total_ip, total_cidr, output_fqdn > ENVIRON["UPDATE_STATUS_FILE"];
+            printf "%s %s %s", output_ip, total_cidr, output_fqdn > ENVIRON["UPDATE_STATUS_FILE"];
             exit exit_code;
         }'
     return $?

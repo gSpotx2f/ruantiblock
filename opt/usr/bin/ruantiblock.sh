@@ -7,7 +7,7 @@
 # Author:       gSpot <https://github.com/gSpotx2f/ruantiblock>
 # License:      GPLv3
 # Depends:
-# Recommends:   idn, lua, tor, tor-geoip
+# Recommends:   idn, lua, luasocket, luasec, tor, tor-geoip
 #
 ########################################################################
 
@@ -58,14 +58,19 @@ MODULE_RUN_TIMEOUT=60
 export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
 export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
+export LANGUAGE="en"
+
+DATA_DIR="/opt/var/${NAME}"
 
 ### Модули для получения и обработки блэклиста
 MODULES_DIR="/opt/usr/bin"
-BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab.az-rbl.all.lua"
-#BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab.az-rbl.all.lua"
-#BLLIST_MODULE_CMD="${MODULES_DIR}/ruab.az.fqdn.sh"
-#BLLIST_MODULE_CMD="${MODULES_DIR}/ruab.az-rbl.all.sh"
+BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab_parser.lua"
+#BLLIST_MODULE_CMD="${MODULES_DIR}/ruab_parser.sh"
 #BLLIST_MODULE_CMD=""
+
+### External config
+CONFIG_FILE="/opt/etc/${NAME}/ruantiblock.conf"
+[ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
 AWK_CMD="awk"
 IPT_CMD="iptables"
@@ -82,7 +87,6 @@ if [ $USE_LOGGER = "1" -a $? -ne 0 ]; then
 fi
 LOGGER_PARAMS="-t `basename $0`[${$}] -p user.notice"
 DNSMASQ_RESTART_CMD="/sbin/restart_dhcpd; /sbin/restart_dns"
-DATA_DIR="/opt/var/${NAME}"
 export DNSMASQ_DATA_FILE="${DATA_DIR}/${NAME}.dnsmasq"
 export IP_DATA_FILE="${DATA_DIR}/${NAME}.ip"
 export IPSET_IP="${NAME}-ip"
@@ -103,7 +107,7 @@ HTML_THEADER_FONTCOLOR="#4C4C4C"
 HTML_BORDER_COLOR="#B5B5B5"
 HTML_MAIN_FONT_COLOR="#333333"
 ### Пользовательские записи
-USER_ENTRIES_FILE="/opt/etc/ruab_user_entries"
+USER_ENTRIES_FILE="/opt/etc/${NAME}/ruab_user_entries"
 
 ########################### Iptables config ############################
 
@@ -291,6 +295,7 @@ FillIpsets () {
         cat "$IP_DATA_FILE" | $IPSET_CMD restore && { $IPSET_CMD swap "$IPSET_IP_TMP" "$IPSET_IP"; $IPSET_CMD swap "$IPSET_CIDR_TMP" "$IPSET_CIDR"; }
         if [ $? -eq 0 ]; then
             echo " Ok"
+            FlushIpSets "$IPSET_IP_TMP" "$IPSET_CIDR_TMP"
         else
             echo " Error! Ipset wasn't updated" >&2
             MakeLogRecord "Error! Ipset wasn't updated"
@@ -310,7 +315,7 @@ CheckStatus () {
     local _set _ipt_return=0 _ipset_return=0 _return_code=1
     $IPT_CMD -t "$IPT_TABLE" -L "$IPT_CHAIN" &> /dev/null
     _ipt_return=$?
-    if [ "$1" = "ipset" ]; then
+    if [ "$1" = "ipsets" ]; then
         for _set in "$IPSET_TOTAL_PROXY" "$IPSET_CIDR_TMP" "$IPSET_CIDR" "$IPSET_IP_TMP" "$IPSET_IP" "$IPSET_DNSMASQ" "$IPSET_ONION"
         do
             IsIpsetExists "$_set"
@@ -333,14 +338,15 @@ AddUserEntries () {
     if [ "$ADD_USER_ENTRIES" = "1" ]; then
         if [ -f "$USER_ENTRIES_FILE" -a -s "$USER_ENTRIES_FILE" ]; then
             $AWK_CMD 'BEGIN {
-                        while((getline ip_string <ENVIRON["IP_DATA_FILE"]) > 0){
+                        null="";
+                        while((getline ip_string <ENVIRON["IP_DATA_FILE"]) > 0) {
                             split(ip_string, ip_string_arr, " ");
-                            ip_data_array[ip_string_arr[3]]="";
+                            ip_data_array[ip_string_arr[3]]=null;
                         };
                         close(ENVIRON["IP_DATA_FILE"]);
-                        while((getline fqdn_string <ENVIRON["DNSMASQ_DATA_FILE"]) > 0){
+                        while((getline fqdn_string <ENVIRON["DNSMASQ_DATA_FILE"]) > 0) {
                             split(fqdn_string, fqdn_string_arr, "/");
-                            fqdn_data_array[fqdn_string_arr[2]]="";
+                            fqdn_data_array[fqdn_string_arr[2]]=null;
                         };
                         close(ENVIRON["DNSMASQ_DATA_FILE"]);
                     }
