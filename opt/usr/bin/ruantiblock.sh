@@ -45,7 +45,7 @@ IF_VPN="tun0"
 ### --set-mark для отбора пакетов в VPN туннель
 VPN_PKTS_MARK=1
 ### Максимальное кол-во элементов списка ipset (по умол.: 65536, на данный момент уже не хватает для полного списка ip...)
-IPSET_MAXELEM=150000
+IPSET_MAXELEM=400000
 ### Таймаут для записей в сете $IPSET_DNSMASQ
 IPSET_DNSMASQ_TIMEOUT=900
 ### Кол-во попыток обновления блэклиста (в случае неудачи)
@@ -373,12 +373,11 @@ AddUserEntries () {
 }
 
 GetDataFiles () {
-    local _return_code=1 _update_string _attempt
+    local _return_code=1 _attempt=1 _update_string
     PreStartCheck
     echo "$$" > "$UPDATE_PID_FILE"
     if [ -n "$BLLIST_MODULE_CMD" ]; then
-        _attempt=1
-        until [ $_attempt -gt $MODULE_RUN_ATTEMPTS ]
+        while :
         do
             eval `echo "$BLLIST_MODULE_CMD"`
             _return_code=$?
@@ -387,6 +386,7 @@ GetDataFiles () {
             echo " Module run attempt ${_attempt}: failed [${BLLIST_MODULE_CMD}]"
             MakeLogRecord "Module run attempt ${_attempt}: failed [${BLLIST_MODULE_CMD}]"
             _attempt=`expr $_attempt + 1`
+            [ $_attempt -gt $MODULE_RUN_ATTEMPTS ] && break
             sleep $MODULE_RUN_TIMEOUT
         done
         AddUserEntries
@@ -480,7 +480,7 @@ Status () {
     local _set
     local _call_iptables="${IPT_CMD} -t ${IPT_TABLE} -v -L ${IPT_CHAIN}"
     if CheckStatus; then
-        printf "\n \033[1m${NAME} status\033[m: \033[1;32mActive\033[m\n\n  PROXY_MODE: ${PROXY_MODE}\n  DEF_TOTAL_PROXY: ${DEF_TOTAL_PROXY}\n  BLLIST_MODULE_CMD: ${BLLIST_MODULE_CMD}\n"
+        printf "\n \033[1m${NAME} status\033[m: \033[1;32mActive\033[m\n\n  PROXY_MODE: ${PROXY_MODE}\n  DEF_TOTAL_PROXY: ${DEF_TOTAL_PROXY}\n  PROXY_LOCAL_CLIENTS: ${PROXY_LOCAL_CLIENTS}\n  BLLIST_MODULE_CMD: ${BLLIST_MODULE_CMD}\n"
         if [ -f "$UPDATE_STATUS_FILE" ]; then
             $AWK_CMD '{
                 update_string=(NF < 4) ? "No data" : $4" (ip: "$1" | CIDR: "$2" | FQDN: "$3")";
@@ -545,6 +545,7 @@ EOF
             <tr class=\"list green\"><td align=\"left\">${NAME} status:</td><td align=\"left\">Active</td></tr>\n\
             <tr class=\"list\"><td align=\"left\">PROXY_MODE:</td><td align=\"left\">${PROXY_MODE}</td></tr>\n\
             <tr class=\"list\"><td align=\"left\">DEF_TOTAL_PROXY:</td><td align=\"left\">${DEF_TOTAL_PROXY}</td></tr>\n\
+            <tr class=\"list\"><td align=\"left\">PROXY_LOCAL_CLIENTS:</td><td align=\"left\">${PROXY_LOCAL_CLIENTS}</td></tr>\n\
             <tr class=\"list\"><td align=\"left\">BLLIST_MODULE_CMD:</td><td align=\"left\">${BLLIST_MODULE_CMD}</td></tr>\n" >> "$HTML_OUTPUT"
             if [ -f "$UPDATE_STATUS_FILE" ]; then
                 $AWK_CMD '{

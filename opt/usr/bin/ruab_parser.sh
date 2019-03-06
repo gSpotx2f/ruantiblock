@@ -38,7 +38,7 @@ export ENTRIES_FILTER_PATTERNS="^youtube[.]com"
 ### Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
 export SD_LIMIT=16
 ### Лимит ip адресов. При достижении, в конфиг ipset будет добавлена вся подсеть /24 вместо множества ip-адресов пренадлежащих этой сети (0 - off)
-export IP_LIMIT=10
+export IP_LIMIT=0
 ### Подсети класса C (/24). Ip-адреса из этих подсетей не группируются при оптимизации (записи д.б. в виде: 68.183.221. 149.154.162. и пр.). Прим.: OPT_EXCLUDE_NETS="68.183.221. 149.154.162."
 export OPT_EXCLUDE_NETS=""
 ### В случае если из источника получено менее указанного кол-ва записей, то обновления списков не происходит
@@ -132,7 +132,7 @@ MakeDataFiles () {
             makeConstArray(ENVIRON["ENTRIES_FILTER_PATTERNS"], remove_patterns_array, " ");
             makeConstArray(ENVIRON["OPT_EXCLUDE_NETS"], ex_nets_array, " ");
             ### Массив шаблонов из $ENTRIES_FILTER_FILE
-            null=0;
+            null="";
             if(ENVIRON["ENTRIES_FILTER"] == 1) {
                 pattern="";
                 while((getline pattern <ENTRIES_FILTER_FILE) > 0){
@@ -164,7 +164,7 @@ MakeDataFiles () {
                 return 0;
             };
         };
-        ### Получение SLD из доменов низших уровней
+        ### Получение SLD из доменов высших уровней
         function getSld(val) {
             return substr(val, match(val, /[a-z0-9_-]+[.][a-z0-9-]+$/));
         };
@@ -189,7 +189,6 @@ MakeDataFiles () {
                         if(_subnet in subnet_array) subnet_array[_subnet]++;
                         else subnet_array[_subnet]=1;
                         total_ip_array[_ip_entry]=_subnet;
-                        #total_ip_array[_ip_entry]=null;
                         total_ip++;
                     };
                 };
@@ -277,7 +276,6 @@ MakeDataFiles () {
                 ### Оптимизация ip-адресов и запись в $IP_DATA_FILE
                 for(ip in total_ip_array) {
                     subnet=total_ip_array[ip];
-                    #subnet=getSubnet(ip);
                     if(subnet in subnet_array) {
                         if(ENVIRON["IP_LIMIT"] > 0 && !(subnet in ex_nets_array) && (subnet_array[subnet] >= ENVIRON["IP_LIMIT"])) {
                             value=subnet"0/24";
