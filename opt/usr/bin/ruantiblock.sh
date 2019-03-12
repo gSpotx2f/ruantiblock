@@ -64,7 +64,7 @@ DATA_DIR="/opt/var/${NAME}"
 
 ### Модули для получения и обработки блэклиста
 MODULES_DIR="/opt/usr/bin"
-BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab_parser.lua"
+BLLIST_MODULE_CMD="/opt/bin/lua ${MODULES_DIR}/ruab_parser.lua"
 #BLLIST_MODULE_CMD="${MODULES_DIR}/ruab_parser.sh"
 #BLLIST_MODULE_CMD=""
 
