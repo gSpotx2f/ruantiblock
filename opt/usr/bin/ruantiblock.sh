@@ -7,7 +7,7 @@
 # Author:       gSpot <https://github.com/gSpotx2f/ruantiblock>
 # License:      GPLv3
 # Depends:
-# Recommends:   idn, lua, luasocket, luasec, tor, tor-geoip
+# Recommends:   idn, iconv, lua, luasocket, luasec, tor, tor-geoip
 #
 ########################################################################
 
@@ -55,7 +55,8 @@ MODULE_RUN_TIMEOUT=60
 
 ############################ Configuration #############################
 
-export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
+#export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
+export PATH="/opt/bin:/opt/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
 export LANGUAGE="en"
@@ -64,12 +65,12 @@ DATA_DIR="/opt/var/${NAME}"
 
 ### Модули для получения и обработки блэклиста
 MODULES_DIR="/opt/usr/bin"
-BLLIST_MODULE_CMD="/opt/bin/lua ${MODULES_DIR}/ruab_parser.lua"
+BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab_parser.lua"
 #BLLIST_MODULE_CMD="${MODULES_DIR}/ruab_parser.sh"
 #BLLIST_MODULE_CMD=""
 
 ### External config
-CONFIG_FILE="/opt/etc/${NAME}/ruantiblock.conf"
+CONFIG_FILE="/opt/etc/${NAME}/${NAME}.conf"
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
 AWK_CMD="awk"
@@ -270,7 +271,6 @@ SetNetConfig () {
     do
         IsIpsetExists "$_set" || $IPSET_CMD create "$_set" hash:net maxelem $IPSET_MAXELEM
     done
-
     for _set in "$IPSET_IP_TMP" "$IPSET_IP" "$IPSET_ONION"
     do
         IsIpsetExists "$_set" || $IPSET_CMD create "$_set" hash:ip maxelem $IPSET_MAXELEM

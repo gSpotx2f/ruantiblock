@@ -16,7 +16,8 @@
 
 ############################ Configuration #############################
 
-export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
+#export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
+export PATH="/opt/bin:/opt/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
 export LANGUAGE="en"
@@ -24,7 +25,7 @@ export LANGUAGE="en"
 DATA_DIR="/opt/var/${NAME}"
 
 ### External config
-CONFIG_FILE="/opt/etc/${NAME}/ruantiblock.conf"
+CONFIG_FILE="/opt/etc/${NAME}/${NAME}.conf"
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
 AWK_CMD="awk"

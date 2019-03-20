@@ -25,6 +25,8 @@ export ALT_NSLOOKUP=1
 export ALT_DNS_ADDR="8.8.8.8"
 ### Преобразование кириллических доменов в punycode (0 - off, 1 - on)
 export USE_IDN=0
+### Перекодировка данных для источников с кодировкой отличной от UTF-8 (0 - off, 1 - on)
+export USE_ICONV=0
 ### SLD не подлежащие оптимизации (через пробел)
 export OPT_EXCLUDE_SLD="livejournal.com facebook.com vk.com blog.jp msk.ru net.ru org.ru net.ua com.ua org.ua co.uk amazonaws.com"
 ### Не оптимизировать SLD попадающие под выражения (через пробел)
@@ -35,7 +37,7 @@ export ENTRIES_FILTER=1
 export ENTRIES_FILTER_FILE="/opt/etc/ruantiblock/ruab_entries_filter"
 ### Стандартные шаблоны для опции ENTRIES_FILTER (через пробел). Добавляются к шаблонам из файла ENTRIES_FILTER_FILE (также применяются при отсутствии ENTRIES_FILTER_FILE)
 export ENTRIES_FILTER_PATTERNS="^youtube[.]com"
-### Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
+### Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов (0 - off)
 export SD_LIMIT=16
 ### Лимит ip адресов. При достижении, в конфиг ipset будет добавлена вся подсеть /24 вместо множества ip-адресов пренадлежащих этой сети (0 - off)
 export IP_LIMIT=0
@@ -48,10 +50,12 @@ export STRIP_WWW=1
 
 ############################ Configuration #############################
 
-export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
+#export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
+export PATH="/opt/bin:/opt/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
 export LANGUAGE="en"
+export ENCODING="UTF-8"
 
 DATA_DIR="/opt/var/${NAME}"
 
@@ -62,9 +66,12 @@ AZ_FQDN_URL="http://api.antizapret.info/group.php?data=domain"
 #RBL_ALL_URL="http://reestr.rublacklist.net/api/current"
 RBL_ALL_URL="http://api.reserve-rbl.ru/api/current"
 ZI_ALL_URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
+AZ_ENCODING=""
+RBL_ENCODING=""
+ZI_ENCODING="CP1251"
 
 ### External config
-CONFIG_FILE="/opt/etc/${NAME}/ruantiblock.conf"
+CONFIG_FILE="/opt/etc/${NAME}/${NAME}.conf"
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
 AWK_CMD="awk"
@@ -78,6 +85,11 @@ IDN_CMD=`which idn`
 if [ $USE_IDN = "1" -a $? -ne 0 ]; then
     echo " Idn doesn't exists" >&2
     USE_IDN=0
+fi
+ICONV_CMD=`which iconv`
+if [ $USE_ICONV = "1" -a $? -ne 0 ]; then
+    echo " Iconv doesn't exists" >&2
+    USE_ICONV=0
 fi
 export DNSMASQ_DATA_FILE="${DATA_DIR}/${NAME}.dnsmasq"
 export IP_DATA_FILE="${DATA_DIR}/${NAME}.ip"
@@ -122,10 +134,21 @@ GetZapretinfo () {
     DlRun "$ZI_ALL_URL"
 }
 
+ConvertEncoding () {
+    if [ "$USE_ICONV" = "1" -a -n "$1" ]; then
+        $ICONV_CMD -f "$1" -t "$ENCODING"
+    else
+        cat -
+    fi
+}
+
 MakeDataFiles () {
     local _return_code
     $AWK_CMD -F ";" -v IDN_CMD="$IDN_CMD" -v ENTRIES_FILTER_FILE="$ENTRIES_FILTER_FILE" '
         BEGIN {
+            ### Коды unicode для кириллицы
+            cyr_array["0430"]="а"; cyr_array["0431"]="б"; cyr_array["0432"]="в"; cyr_array["0433"]="г"; cyr_array["0434"]="д"; cyr_array["0435"]="е"; cyr_array["0451"]="ё"; cyr_array["0436"]="ж"; cyr_array["0437"]="з"; cyr_array["0438"]="и"; cyr_array["0439"]="й"; cyr_array["043a"]="к"; cyr_array["043b"]="л"; cyr_array["043c"]="м"; cyr_array["043d"]="н"; cyr_array["043e"]="о"; cyr_array["043f"]="п"; cyr_array["0440"]="р"; cyr_array["0441"]="с"; cyr_array["0442"]="т"; cyr_array["0443"]="у"; cyr_array["0444"]="ф"; cyr_array["0445"]="х"; cyr_array["0446"]="ц"; cyr_array["0447"]="ч"; cyr_array["0448"]="ш"; cyr_array["0449"]="щ"; cyr_array["044a"]="ъ"; cyr_array["044b"]="ы"; cyr_array["044c"]="ь"; cyr_array["044d"]="э"; cyr_array["044e"]="ю"; cyr_array["044f"]="я";
+            #cyr_array["0410"]="А"; cyr_array["0411"]="Б"; cyr_array["0412"]="В"; cyr_array["0413"]="Г"; cyr_array["0414"]="Д"; cyr_array["0415"]="Е"; cyr_array["0401"]="Ё"; cyr_array["0416"]="Ж"; cyr_array["0417"]="З"; cyr_array["0418"]="И"; cyr_array["0419"]="Й"; cyr_array["041a"]="К"; cyr_array["041b"]="Л"; cyr_array["041c"]="М"; cyr_array["041d"]="Н"; cyr_array["041e"]="О"; cyr_array["041f"]="П"; cyr_array["0420"]="Р"; cyr_array["0421"]="С"; cyr_array["0422"]="Т"; cyr_array["0423"]="У"; cyr_array["0424"]="Ф"; cyr_array["0425"]="Х"; cyr_array["0426"]="Ц"; cyr_array["0427"]="Ч"; cyr_array["0428"]="Ш"; cyr_array["0429"]="Щ"; cyr_array["042a"]="Ъ"; cyr_array["042b"]="Ы"; cyr_array["042c"]="Ь"; cyr_array["042d"]="Э"; cyr_array["042e"]="Ю"; cyr_array["042f"]="Я";
             ### Массивы из констант с исключениями
             makeConstArray(ENVIRON["OPT_EXCLUDE_MASKS"], ex_masks_array, " ");
             makeConstArray(ENVIRON["OPT_EXCLUDE_SLD"], ex_sld_array, " ");
@@ -142,11 +165,6 @@ MakeDataFiles () {
                 close(ENTRIES_FILTER_FILE);
             };
             total_ip=0; total_cidr=0; total_fqdn=0;
-            ### Определение разделителя записей (строк)
-            if(ENVIRON["BL_UPDATE_MODE"] == "rublacklist")
-                RS="\134";
-            else
-                RS="\n";
         }
         ### Массивы из констант
         function makeConstArray(string, array, separator,  _split_array, _i) {
@@ -154,7 +172,7 @@ MakeDataFiles () {
             for(_i in _split_array)
                 array[_split_array[_i]]=null;
         };
-        ### Сопоставление с массивом рег.выражений
+        ### Проверка по массиву рег.выражений
         function checkExpr(val, array) {
             if(ENVIRON["ENTRIES_FILTER"] == 1) {
                 for(pattern in array) {
@@ -164,11 +182,17 @@ MakeDataFiles () {
                 return 0;
             };
         };
-        ### Получение SLD из доменов высших уровней
+        ### Буквы кириллицы из hex юникода
+        function hexToUnicode(val, _i) {
+            for(_i in cyr_array)
+                gsub("\134\134u"_i, cyr_array[_i], val);
+            return val;
+        };
+        ### SLD из доменов высших уровней
         function getSld(val) {
             return substr(val, match(val, /[a-z0-9_-]+[.][a-z0-9-]+$/));
         };
-        ### Получение подсети из ip
+        ### Подсеть из ip
         function getSubnet(val) {
             sub(/[0-9]{1,3}$/, "", val);
             return val
@@ -207,7 +231,7 @@ MakeDataFiles () {
                 close(_call_idn);
             };
             if(checkExpr(val, remove_patterns_array) == 1) next;
-            ### Проверка на отсутствие лишних символов
+            ### Проверка на лишние символы
             if(val ~ /^[a-z0-9._-]+[.]([a-z]{2,}|xn--[a-z0-9]+)$/) {
                 total_fqdn++;
                 ### SLD из FQDN
@@ -216,19 +240,21 @@ MakeDataFiles () {
                     ### Исключение доменов совпадающих с выражениями из $OPT_EXCLUDE_MASKS
                     if(length(ex_masks_array) > 0 && checkExpr(val, ex_masks_array) == 1) next;
                     total_fqdn_array[val]=_sld;
-                    ### Если SLD уже обрабатывался ранее, то счетчик++, если нет, то добавляется элемент sld_array[SLD] и счетчик=1 (далее, если после обработки всех записей, счетчик >= $SD_LIMIT, то в итоговом выводе остается только запись SLD вместо записей низших ур-ней)
+                    ### Если SLD уже обрабатывался ранее, то счетчик++, если нет, то добавляется элемент sld_array[SLD] и счетчик=1 (далее, если после обработки всех записей, счетчик >= $SD_LIMIT, то в итоговом выводе остается только запись SLD вместо записей высших ур-ней)
                     if(_sld in sld_array) sld_array[_sld]++;
                     else sld_array[_sld]=1;
                 };
             };
         };
-        (ENVIRON["BL_UPDATE_MODE"] != "rublacklist") || ($0 ~ /^n/) {
+        {
             ip_string=""; fqdn_string="";
             split($0, string_array, ";")
             if(ENVIRON["BL_UPDATE_MODE"] == "rublacklist" || ENVIRON["BL_UPDATE_MODE"] == "zapret-info") {
                 ip_string=string_array[1];
                 fqdn_string=string_array[2];
                 gsub(/[ n]/, "", ip_string);
+                if(ENVIRON["BL_UPDATE_MODE"] == "rublacklist" && ENVIRON["USE_IDN"] == "1" && fqdn_string ~ /\134\134u[a-f0-9]{4}/)
+                    fqdn_string=hexToUnicode(fqdn_string);
             }
             else {
                 if(ENVIRON["BLOCK_MODE"] == "hybrid") {
@@ -271,7 +297,6 @@ MakeDataFiles () {
             if((total_ip + total_cidr + total_fqdn) < ENVIRON["BLLIST_MIN_ENTRS"])
                 exit_code=2;
             else {
-                ### Запись в $IP_DATA_FILE ip-адресов и подсетей CIDR
                 system("rm -f \"" ENVIRON["IP_DATA_FILE"] "\"");
                 ### Оптимизация ip-адресов и запись в $IP_DATA_FILE
                 for(ip in total_ip_array) {
@@ -325,12 +350,14 @@ MakeDataFiles () {
 
 case $BL_UPDATE_MODE in
     "rublacklist")
-        GetRublacklist | MakeDataFiles
+        #GetRublacklist | ConvertEncoding "$RBL_ENCODING" | $AWK_CMD 'BEGIN {RS="\134"} {sub(/^n/, "\n", $0); printf "%s", RS$0}' | MakeDataFiles
+        GetRublacklist | $AWK_CMD 'BEGIN {RS="\134"} {sub(/^n/, "\n", $0); printf "%s", RS$0}' | MakeDataFiles
     ;;
     "zapret-info")
-        GetZapretinfo | MakeDataFiles
+        GetZapretinfo | ConvertEncoding "$ZI_ENCODING" | MakeDataFiles
     ;;
     *)
+        #GetAntizapret | ConvertEncoding "$AZ_ENCODING" | MakeDataFiles
         GetAntizapret | MakeDataFiles
     ;;
 esac

@@ -26,6 +26,8 @@ local Config = {
     ALT_DNS_ADDR = "8.8.8.8",
     -- Преобразование кириллических доменов в punycode (0 - off, 1 - on)
     USE_IDN = 0,
+    -- Перекодировка данных для источников с кодировкой отличной от UTF-8 (0 - off, 1 - on)
+    USE_ICONV = 0,
     -- SLD не подлежащие оптимизации
     OPT_EXCLUDE_SLD = {
         ["livejournal.com"] = true,
@@ -51,7 +53,7 @@ local Config = {
     ENTRIES_FILTER_PATTERNS = {
         ["^youtube[.]com"] = true,
     },
-    -- Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов
+    -- Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов (0 - off)
     SD_LIMIT = 16,
     -- Лимит ip адресов. При достижении, в конфиг ipset будет добавлена вся подсеть /24 вместо множества ip-адресов пренадлежащих этой сети (0 - off)
     IP_LIMIT = 0,
@@ -68,18 +70,27 @@ local Config = {
     IDN_TYPE = "standalone",
     -- Внешняя утилита idn
     IDN_CMD = "idn",
+    -- Тип iconv: внешняя утилита или библиотека lua-iconv (standalone, lua)
+    ICONV_TYPE = "standalone",
+    -- Внешняя утилита iconv
+    ICONV_CMD = "iconv",
     WGET_CMD = "wget --no-check-certificate -q -O -",
     DATA_DIR = "/opt/var/" .. NAME,
     IPSET_DNSMASQ = NAME .. "-dnsmasq",
     IPSET_IP = NAME .. "-ip-tmp",
     IPSET_CIDR = NAME .. "-cidr-tmp",
     -- Источники блэклиста
-    AZ_ALL_URL = "https://api.antizapret.info/all.php?type=csv",
+    AZ_ALL_URL = "http://api.antizapret.info/all.php?type=csv",
     AZ_IP_URL = "http://api.antizapret.info/group.php?data=ip",
     AZ_FQDN_URL = "http://api.antizapret.info/group.php?data=domain",
     --RBL_ALL_URL = "http://reestr.rublacklist.net/api/current",
-    RBL_ALL_URL = "https://api.reserve-rbl.ru/api/current",
+    RBL_ALL_URL = "http://api.reserve-rbl.ru/api/current",
     ZI_ALL_URL = "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv",
+    AZ_ENCODING = "",
+    RBL_ENCODING = "",
+    ZI_ENCODING = "CP1251",
+    encoding = "UTF-8",
+    siteEncoding = "UTF-8",
     httpSendHeadersTable = {
         --["User-Agent"] = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:52.5) Gecko/20100101 Firefox/52.5",
     },
@@ -122,6 +133,7 @@ end
 
 Config.ALT_NSLOOKUP = remapBool(Config.ALT_NSLOOKUP)
 Config.USE_IDN = remapBool(Config.USE_IDN)
+Config.USE_ICONV = remapBool(Config.USE_ICONV)
 Config.STRIP_WWW = remapBool(Config.STRIP_WWW)
 Config.ENTRIES_FILTER = remapBool(Config.ENTRIES_FILTER)
 
@@ -155,7 +167,10 @@ local idn = prequire("idn")
 if Config.USE_IDN and Config.IDN_TYPE == "lua" and not idn then
     error("You need to install idn.lua (github.com/haste/lua-idn) or use standalone idn tool... Otherwise 'Config.USE_IDN' must be set to 'false'")
 end
-
+local iconv = prequire("iconv")
+if Config.USE_ICONV and Config.ICONV_TYPE == "lua" and not iconv then
+    error("You need to install lua-iconv or use standalone iconv tool... Otherwise 'Config.USE_ICONV' must be set to 'false'")
+end
 local http = prequire("socket.http")
 local https = prequire("ssl.https")
 local ltn12 = prequire("ltn12")
@@ -163,7 +178,7 @@ if not ltn12 then
     error("You need to install ltn12...")
 end
 
------------------------------- Classes --------------------------------
+------------------------------ Classes --------------------------
 
 -- Constructor
 
@@ -198,7 +213,6 @@ local BlackListParser = Class(Config, {
     fqdnPattern = "[a-z0-9_%.%-]-[a-z0-9_%-]+%.[a-z0-9%.%-]",
     url = "http://127.0.0.1",
     recordsSeparator = "\n",
-    fildsSeparator = ";",
     ipsSeparator = ",",
 })
 
@@ -206,9 +220,9 @@ function BlackListParser:new(t)
     -- extended instance constructor
     local instance = self(t)
     instance.url = instance["url"] or self.url
-    instance.fildsSeparator = instance["fildsSeparator"] or self.fildsSeparator
     instance.recordsSeparator = instance["recordsSeparator"] or self.recordsSeparator
     instance.ipsSeparator = instance["ipsSeparator"] or self.ipsSeparator
+    instance.siteEncoding = instance["siteEncoding"] or self.siteEncoding
     instance.ipRecordsCount = 0
     instance.ipCount = 0
     instance.ipSubnetTable = {}
@@ -219,15 +233,38 @@ function BlackListParser:new(t)
     instance.fqdnRecordsCount = 0
     instance.ipTable = {}
     instance.cidrTable = {}
+    instance.iconvHandler = (self.USE_ICONV and iconv) and iconv.open(instance.encoding, instance.siteEncoding) or nil
     return instance
+end
+
+function BlackListParser:convertEncoding(input)
+    if self.siteEncoding and self.siteEncoding ~= "" then
+        local output, err
+        if self.ICONV_TYPE == "lua" and self.iconvHandler then
+            output, err = self.iconvHandler:iconv(input)
+        elseif self.ICONV_TYPE == "standalone" then
+            local iconvHandler = assert(io.popen('echo \'' .. input .. '\' | ' .. self.ICONV_CMD .. ' -f "' .. self.siteEncoding .. '" -t "' .. self.encoding .. '"', 'r'))
+            output = iconvHandler:read("*a")
+            iconvHandler:close()
+        else
+            error("Config.ICONV_TYPE should be either 'lua' or 'standalone'")
+        end
+        return (output)
+    end
+    return (input)
 end
 
 function BlackListParser:convertToPunycode(input)
     local output
     if self.IDN_TYPE == "lua" and idn then
+        input = self:convertEncoding(input)
         output = idn.encode(input)
     elseif self.IDN_TYPE == "standalone" then
-        local idnHandler = assert(io.popen(self.IDN_CMD .. " \"" .. input .. "\"", "r"))
+        if self.ICONV_TYPE == "lua" then
+            input = self:convertEncoding(input)
+        end
+        local idnCmdString = (self.IDN_TYPE == "standalone" and self.ICONV_TYPE == "standalone" and self.siteEncoding and self.siteEncoding ~= "") and 'echo \'' .. input .. '\' | ' .. self.ICONV_CMD .. ' -f "' .. self.siteEncoding .. '" -t "' .. self.encoding .. '" | ' .. self.IDN_CMD or self.IDN_CMD .. ' "' .. input .. '"'
+        local idnHandler = assert(io.popen(idnCmdString, 'r'))
         output = idnHandler:read("*l")
         idnHandler:close()
     else
@@ -411,7 +448,7 @@ end
 
 -- Subclasses
 
-function ipSink(self)
+local function ipSink(self)
     return function(chunk)
         if chunk and chunk ~= "" then
             for ipString in chunk:gmatch(self.ipStringPattern) do
@@ -471,7 +508,7 @@ local Rbl = Class(BlackListParser, {
     unicodeHexPattern = "\\u(%x%x%x%x)",
 })
 
-function Rbl:hex2unicode(code)
+function Rbl:hexToUnicode(code)
     local n = tonumber(code, 16)
     if n < 128 then
         return string.char(n)
@@ -489,7 +526,7 @@ function Rbl:sink()
                 if #fqdnStr > 0 and not fqdnStr:match("^" .. self.ipPattern .. "$") then
                     fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
                     if self.USE_IDN and fqdnStr:match(self.unicodeHexPattern) then
-                        fqdnStr = self:convertToPunycode(fqdnStr:gsub(self.unicodeHexPattern, function(s) return self:hex2unicode(s) end))
+                        fqdnStr = self:convertToPunycode(fqdnStr:gsub(self.unicodeHexPattern, function(s) return self:hexToUnicode(s) end))
                     end
                     if fqdnStr:match("^" .. self.fqdnPattern .. "+$") then
                         self:fillDomainTables(fqdnStr)
@@ -509,11 +546,33 @@ local RblIp = Class(Rbl, {
 
     -- zapret-info
 
-local Zi = Class(Rbl, {
+local Zi = Class(BlackListParser, {
     url = Config.ZI_ALL_URL,
     recordsSeparator = "\n",
     ipStringPattern = "([0-9%./ |]+);.-\n",
+    siteEncoding = Config.ZI_ENCODING,
 })
+
+function Zi:sink()
+    return function(chunk)
+        if chunk and chunk ~= "" then
+            for ipStr, fqdnStr in chunk:gmatch("([^;]-);([^;]-);.-" .. self.recordsSeparator) do
+                if #fqdnStr > 0 and not fqdnStr:match("^" .. self.ipPattern .. "$") then
+                    fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
+                    if fqdnStr:match("^" .. self.fqdnPattern .. "+$") then
+                        self:fillDomainTables(fqdnStr)
+                    elseif self.USE_IDN and fqdnStr:match("^[^\\/&%?]-[^\\/&%?%.]+%.[^\\/&%?%.]+%.?$") then
+                        fqdnStr = self:convertToPunycode(fqdnStr)
+                        self:fillDomainTables(fqdnStr)
+                    end
+                elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
+                    self:fillIpTables(ipStr)
+                end
+            end
+        end
+        return true
+    end
+end
 
 local ZiIp = Class(Zi, {
     sink = ipSink
