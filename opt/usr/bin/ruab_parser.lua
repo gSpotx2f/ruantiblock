@@ -2,9 +2,9 @@
     IP, FQDN, CIDR
 
     Модуль для следующих источников:
-     http://api.antizapret.info/all.php?type=csv
-     http://api.antizapret.info/group.php?data=ip
-     http://api.antizapret.info/group.php?data=domain
+     https://api.antizapret.info/all.php?type=csv
+     https://api.antizapret.info/group.php?data=ip
+     https://api.antizapret.info/group.php?data=domain
      http://api.reserve-rbl.ru/api/current
      https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
 
@@ -80,9 +80,9 @@ local Config = {
     IPSET_IP = NAME .. "-ip-tmp",
     IPSET_CIDR = NAME .. "-cidr-tmp",
     -- Источники блэклиста
-    AZ_ALL_URL = "http://api.antizapret.info/all.php?type=csv",
-    AZ_IP_URL = "http://api.antizapret.info/group.php?data=ip",
-    AZ_FQDN_URL = "http://api.antizapret.info/group.php?data=domain",
+    AZ_ALL_URL = "https://api.antizapret.info/all.php?type=csv",
+    AZ_IP_URL = "https://api.antizapret.info/group.php?data=ip",
+    AZ_FQDN_URL = "https://api.antizapret.info/group.php?data=domain",
     --RBL_ALL_URL = "http://reestr.rublacklist.net/api/current",
     RBL_ALL_URL = "http://api.reserve-rbl.ru/api/current",
     ZI_ALL_URL = "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv",
