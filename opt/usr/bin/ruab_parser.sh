@@ -5,9 +5,9 @@
 # IP, FQDN, CIDR
 #
 # Модуль поддерживает следующие источники:
-#  http://api.antizapret.info/group.php?data=ip
-#  http://api.antizapret.info/group.php?data=domain
-#  http://api.antizapret.info/all.php?type=csv
+#  https://api.antizapret.info/group.php?data=ip
+#  https://api.antizapret.info/group.php?data=domain
+#  https://api.antizapret.info/all.php?type=csv
 #  http://api.reserve-rbl.ru/api/current
 #  https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
 #
@@ -60,9 +60,9 @@ export ENCODING="UTF-8"
 DATA_DIR="/opt/var/${NAME}"
 
 ### Источники блэклиста
-AZ_ALL_URL="http://api.antizapret.info/all.php?type=csv"
-AZ_IP_URL="http://api.antizapret.info/group.php?data=ip"
-AZ_FQDN_URL="http://api.antizapret.info/group.php?data=domain"
+AZ_ALL_URL="https://api.antizapret.info/all.php?type=csv"
+AZ_IP_URL="https://api.antizapret.info/group.php?data=ip"
+AZ_FQDN_URL="https://api.antizapret.info/group.php?data=domain"
 #RBL_ALL_URL="http://reestr.rublacklist.net/api/current"
 RBL_ALL_URL="http://api.reserve-rbl.ru/api/current"
 ZI_ALL_URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
