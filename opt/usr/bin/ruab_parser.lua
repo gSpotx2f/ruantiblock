@@ -208,8 +208,8 @@ end
 -- Mixin class
 
 local BlackListParser = Class(Config, {
-    ipPattern = "%d+%.%d+%.%d+%.%d+",
-    cidrPattern = "%d+%.%d+%.%d+%.%d+/%d%d?",
+    ipPattern = "%d%d?%d?%.%d%d?%d?%.%d%d?%d?%.%d%d?%d?",
+    cidrPattern = "%d%d?%d?%.%d%d?%d?%.%d%d?%d?%.%d%d?%d?/%d%d?",
     fqdnPattern = "[a-z0-9_%.%-]-[a-z0-9_%-]+%.[a-z0-9%.%-]",
     url = "http://127.0.0.1",
     recordsSeparator = "\n",

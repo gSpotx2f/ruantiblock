@@ -614,6 +614,7 @@ case "$1" in
         Stop "$1"
         DestroyIpsets "$IPSET_TOTAL_PROXY" "$IPSET_CIDR_TMP" "$IPSET_CIDR" "$IPSET_IP_TMP" "$IPSET_IP" "$IPSET_DNSMASQ" "$IPSET_ONION"
         ClearDataFiles
+        rm -f "$UPDATE_PID_FILE"
         DnsmasqRestart
         HtmlInfo
     ;;
