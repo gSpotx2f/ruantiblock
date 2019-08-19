@@ -298,8 +298,8 @@ end
 
 function BlackListParser:fillIpTables(val)
     if val and val ~= "" then
-        if not self:checkEntriesFilter(val) then
-            for ipEntry in val:gmatch(self.ipPattern .. "/?%d?%d?") do
+        for ipEntry in val:gmatch(self.ipPattern .. "/?%d?%d?") do
+            if not self:checkEntriesFilter(ipEntry) then
                 if ipEntry:match("^" .. self.ipPattern .. "$") and not self.ipTable[ipEntry] then
                     local subnet = ipEntry:match("^(%d+%.%d+%.%d+%.)%d+$")
                     if subnet and (self.OPT_EXCLUDE_NETS[subnet] or ((not self.IP_LIMIT or self.IP_LIMIT == 0) or (not self.ipSubnetTable[subnet] or self.ipSubnetTable[subnet] < self.IP_LIMIT))) then
@@ -504,7 +504,7 @@ local Rbl = Class(BlackListParser, {
     url = Config.RBL_ALL_URL,
     recordsSeparator = "\\n",
     ipsSeparator = " | ",
-    ipStringPattern = "([0-9%./ |]+);.-\\n",
+    ipStringPattern = "([a-f0-9%.:/ |]+);.-\\n",
     unicodeHexPattern = "\\u(%x%x%x%x)",
 })
 
@@ -549,7 +549,7 @@ local RblIp = Class(Rbl, {
 local Zi = Class(BlackListParser, {
     url = Config.ZI_ALL_URL,
     recordsSeparator = "\n",
-    ipStringPattern = "([0-9%./ |]+);.-\n",
+    ipStringPattern = "([a-f0-9%.:/ |]+);.-\n",
     siteEncoding = Config.ZI_ENCODING,
 })
 
