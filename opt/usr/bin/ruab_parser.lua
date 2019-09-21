@@ -1,21 +1,45 @@
 --[[
-    IP, FQDN, CIDR
-
-    Модуль для следующих источников:
-     https://api.antizapret.info/all.php?type=csv
-     https://api.antizapret.info/group.php?data=ip
-     https://api.antizapret.info/group.php?data=domain
-     http://api.reserve-rbl.ru/api/current
-     https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
-
+ Модуль поддерживает следующие источники:
+    https://api.antizapret.info/all.php?type=csv
+    https://api.antizapret.info/group.php?data=ip
+    https://api.antizapret.info/group.php?data=domain
+    https://reestr.rublacklist.net/api/v2/current/csv
+    https://reestr.rublacklist.net/api/v2/ips/csv
+    https://reestr.rublacklist.net/api/v2/domains/json
+    https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
 --]]
 
 local NAME = "ruantiblock"
 local CONFIG_FILE = "/opt/etc/ruantiblock/ruantiblock.conf"
 
------------------------------- Settings --------------------------------
+-------------------------- Class constructor -------------------------
 
-local Config = {
+local function Class(super, t)
+    local class = t or {}
+    local function instanceConstructor(cls, t)
+        local instance = t or {}
+        setmetatable(instance, cls)
+        instance.__class = cls
+        return instance
+    end
+    if not super then
+        local mt = {__call = instanceConstructor}
+        mt.__index = mt
+        setmetatable(class, mt)
+    elseif type(super) == "table" and super.__index and super.__call then
+        setmetatable(class, super)
+        class.__super = super
+    else
+        error("Argument error! Incorrect object of a 'super'")
+    end
+    class.__index = class
+    class.__call = instanceConstructor
+    return class
+end
+
+------------------------------ Settings ------------------------------
+
+local Config = Class(nil, {
     -- Тип обновления списка блокировок (antizapret, rublacklist, zapret-info)
     BL_UPDATE_MODE = "antizapret",
     -- Режим обхода блокировок: ip (если провайдер блокирует по ip), hybrid (если провайдер использует DPI, подмену DNS и пр.), fqdn (если провайдер использует DPI, подмену DNS и пр.)
@@ -45,14 +69,20 @@ local Config = {
     },
     -- Не оптимизировать SLD попадающие под выражения из таблицы
     OPT_EXCLUDE_MASKS = {},     -- { "^%a%a%a?.%a%a$" },
-    -- Фильтрация записей блэклиста по шаблонам из файла ENTRIES_FILTER_FILE. Записи (ip, CIDR, FQDN) попадающие под шаблоны исключаются из кофигов ipset и dnsmasq (0 - off, 1 - on)
+    -- Фильтрация записей блэклиста по шаблонам из файла ENTRIES_FILTER_FILE. Записи (FQDN) попадающие под шаблоны исключаются из кофига dnsmasq (0 - off, 1 - on)
     ENTRIES_FILTER = 1,
-    -- Файл с шаблонами для опции ENTRIES_FILTER (каждый шаблон в отдельной строке. # в первом символе строки - комментирует строку)
+    -- Файл с шаблонами FQDN для опции ENTRIES_FILTER (каждый шаблон в отдельной строке. # в первом символе строки - комментирует строку)
     ENTRIES_FILTER_FILE = "/opt/etc/ruantiblock/ruab_entries_filter",
-    -- Стандартные шаблоны для опции ENTRIES_FILTER. Добавляются к шаблонам из файла ENTRIES_FILTER_FILE (также применяются при отсутствии ENTRIES_FILTER_FILE)
+    -- Стандартные шаблоны для опции ENTRIES_FILTER (через пробел). Добавляются к шаблонам из файла ENTRIES_FILTER_FILE (также применяются при отсутствии ENTRIES_FILTER_FILE)
     ENTRIES_FILTER_PATTERNS = {
         ["^youtube[.]com"] = true,
     },
+    -- Фильтрация записей блэклиста по шаблонам из файла IP_FILTER_FILE. Записи (ip, CIDR) попадающие под шаблоны исключаются из кофига ipset (0 - off, 1 - on)
+    IP_FILTER = 1,
+    -- Файл с шаблонами ip для опции ENTRIES_FILTER (каждый шаблон в отдельной строке. # в первом символе строки - комментирует строку)
+    IP_FILTER_FILE = "/opt/etc/ruantiblock/ruab_ip_filter",
+    -- Стандартные шаблоны для опции IP_FILTER. Добавляются к шаблонам из файла IP_FILTER_FILE (также применяются при отсутствии IP_FILTER_FILE)
+    IP_FILTER_PATTERNS = {},
     -- Лимит для субдоменов. При достижении, в конфиг dnsmasq будет добавлен весь домен 2-го ур-ня вместо множества субдоменов (0 - off)
     SD_LIMIT = 16,
     -- Лимит ip адресов. При достижении, в конфиг ipset будет добавлена вся подсеть /24 вместо множества ip-адресов пренадлежащих этой сети (0 - off)
@@ -83,8 +113,9 @@ local Config = {
     AZ_ALL_URL = "https://api.antizapret.info/all.php?type=csv",
     AZ_IP_URL = "https://api.antizapret.info/group.php?data=ip",
     AZ_FQDN_URL = "https://api.antizapret.info/group.php?data=domain",
-    --RBL_ALL_URL = "http://reestr.rublacklist.net/api/current",
-    RBL_ALL_URL = "http://api.reserve-rbl.ru/api/current",
+    RBL_ALL_URL = "https://reestr.rublacklist.net/api/v2/current/csv",
+    RBL_IP_URL = "https://reestr.rublacklist.net/api/v2/ips/csv",
+    RBL_FQDN_URL = "https://reestr.rublacklist.net/api/v2/domains/json",
     ZI_ALL_URL = "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv",
     AZ_ENCODING = "",
     RBL_ENCODING = "",
@@ -92,16 +123,15 @@ local Config = {
     encoding = "UTF-8",
     siteEncoding = "UTF-8",
     httpSendHeadersTable = {
-        --["User-Agent"] = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:52.5) Gecko/20100101 Firefox/52.5",
+        --["User-Agent"] = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0",
     },
-}
-Config.__index = Config
-Config.__call = true
+})
+Config.wgetUserAgent = (Config.httpSendHeadersTable["User-Agent"]) and ' -U "' .. Config.httpSendHeadersTable["User-Agent"] .. '"' or ''
 
--- External config
+-- Load external config
 
 function Config:loadExternalConfig()
-    local configArrays = {["ENTRIES_FILTER_PATTERNS"] = true, ["OPT_EXCLUDE_SLD"] = true, ["OPT_EXCLUDE_NETS"] = true,}
+    local configArrays = {["ENTRIES_FILTER_PATTERNS"] = true, ["IP_FILTER_PATTERNS"] = true, ["OPT_EXCLUDE_SLD"] = true, ["OPT_EXCLUDE_NETS"] = true,}
     local fileHandler = io.open(CONFIG_FILE, "r")
     if fileHandler then
         for line in fileHandler:lines() do
@@ -136,31 +166,37 @@ Config.USE_IDN = remapBool(Config.USE_IDN)
 Config.USE_ICONV = remapBool(Config.USE_ICONV)
 Config.STRIP_WWW = remapBool(Config.STRIP_WWW)
 Config.ENTRIES_FILTER = remapBool(Config.ENTRIES_FILTER)
+Config.IP_FILTER = remapBool(Config.IP_FILTER)
 
-function Config:loadEntriesFilter()
-    if self.ENTRIES_FILTER then
-        local fileHandler = io.open(self.ENTRIES_FILTER_FILE, "r")
+-- Load filters
+
+function Config:loadFilterFiles()
+    function loadFile(file, t)
+        local fileHandler = io.open(file, "r")
         if fileHandler then
             for line in fileHandler:lines() do
                 if #line > 0 and line:match("^[^#]") then
-                    self.ENTRIES_FILTER_PATTERNS[line] = true
+                    t[line] = true
                 end
             end
             fileHandler:close()
         end
     end
+    if self.ENTRIES_FILTER then
+        loadFile(self.ENTRIES_FILTER_FILE, self.ENTRIES_FILTER_PATTERNS)
+    end
+    if self.IP_FILTER then
+        loadFile(self.IP_FILTER_FILE, self.IP_FILTER_PATTERNS)
+    end
 end
 
-Config:loadEntriesFilter()
+Config:loadFilterFiles()
 
 -- Import packages
 
 local function prequire(package)
-    local result = pcall(require, package)
-    if not result then
-        return nil
-    end
-    return require(package)
+    local retVal, pkg = pcall(require, package)
+    return retVal and pkg
 end
 
 local idn = prequire("idn")
@@ -178,34 +214,7 @@ if not ltn12 then
     error("You need to install ltn12...")
 end
 
------------------------------- Classes --------------------------
-
--- Constructor
-
-local function Class(super, t)
-    local class = t or {}
-    local function instanceConstructor(cls, t)
-        local instance = t or {}
-        setmetatable(instance, cls)
-        instance.__class = cls
-        return instance
-    end
-    if not super then
-        local mt = {__call = instanceConstructor}
-        mt.__index = mt
-        setmetatable(class, mt)
-    elseif type(super) == "table" and super.__index and super.__call then
-        setmetatable(class, super)
-        class.__super = super
-    else
-        error("Argument error! Incorrect object of a 'super'")
-    end
-    class.__index = class
-    class.__call = instanceConstructor
-    return class
-end
-
--- Mixin class
+------------------------------ Classes -------------------------------
 
 local BlackListParser = Class(Config, {
     ipPattern = "%d%d?%d?%.%d%d?%d?%.%d%d?%d?%.%d%d?%d?",
@@ -213,7 +222,7 @@ local BlackListParser = Class(Config, {
     fqdnPattern = "[a-z0-9_%.%-]-[a-z0-9_%-]+%.[a-z0-9%.%-]",
     url = "http://127.0.0.1",
     recordsSeparator = "\n",
-    ipsSeparator = ",",
+    ipsSeparator = " | ",
 })
 
 function BlackListParser:new(t)
@@ -273,9 +282,9 @@ function BlackListParser:convertToPunycode(input)
     return (output)
 end
 
-function BlackListParser:checkEntriesFilter(str)
-    if self.ENTRIES_FILTER and self.ENTRIES_FILTER_PATTERNS and str then
-        for pattern in pairs(self.ENTRIES_FILTER_PATTERNS) do
+function BlackListParser:checkFilter(str, filterPatterns)
+    if filterPatterns and str then
+        for pattern in pairs(filterPatterns) do
             if str:match(pattern) then
                 return true
             end
@@ -284,26 +293,34 @@ function BlackListParser:checkEntriesFilter(str)
     return false
 end
 
+function BlackListParser:getSLD(fqdn)
+    return fqdn:match("^[a-z0-9_%.%-]-([a-z0-9_%-]+%.[a-z0-9%-]+)$")
+end
+
 function BlackListParser:fillDomainTables(val)
     if self.STRIP_WWW then val = val:gsub("^www[0-9]?%.", "") end
-    if not self:checkEntriesFilter(val) then
-        local secondLevelDomain = val:match("^[a-z0-9_%.%-]-([a-z0-9_%-]+%.[a-z0-9%-]+)$")
+    if not self.ENTRIES_FILTER or (self.ENTRIES_FILTER and not self:checkFilter(val, self.ENTRIES_FILTER_PATTERNS)) then
+        local secondLevelDomain = self:getSLD(val)
         if secondLevelDomain and (self.OPT_EXCLUDE_SLD[secondLevelDomain] or ((not self.SD_LIMIT or self.SD_LIMIT == 0) or (not self.sldTable[secondLevelDomain] or self.sldTable[secondLevelDomain] < self.SD_LIMIT))) then
-            self.fqdnTable[val] = secondLevelDomain
+            self.fqdnTable[val] = true
             self.sldTable[secondLevelDomain] = (self.sldTable[secondLevelDomain] or 0) + 1
             self.fqdnCount = self.fqdnCount + 1
         end
     end
 end
 
+function BlackListParser:getSubnet(ip)
+    return ip:match("^(%d+%.%d+%.%d+%.)%d+$")
+end
+
 function BlackListParser:fillIpTables(val)
     if val and val ~= "" then
         for ipEntry in val:gmatch(self.ipPattern .. "/?%d?%d?") do
-            if not self:checkEntriesFilter(ipEntry) then
+            if not self.IP_FILTER or (self.IP_FILTER and not self:checkFilter(ipEntry, self.IP_FILTER_PATTERNS)) then
                 if ipEntry:match("^" .. self.ipPattern .. "$") and not self.ipTable[ipEntry] then
-                    local subnet = ipEntry:match("^(%d+%.%d+%.%d+%.)%d+$")
+                    local subnet = self:getSubnet(ipEntry)
                     if subnet and (self.OPT_EXCLUDE_NETS[subnet] or ((not self.IP_LIMIT or self.IP_LIMIT == 0) or (not self.ipSubnetTable[subnet] or self.ipSubnetTable[subnet] < self.IP_LIMIT))) then
-                        self.ipTable[ipEntry] = subnet
+                        self.ipTable[ipEntry] = true
                         self.ipSubnetTable[subnet] = (self.ipSubnetTable[subnet] or 0) + 1
                         self.ipCount = self.ipCount + 1
                     end
@@ -323,7 +340,7 @@ end
 
 function BlackListParser:makeDnsmasqConfig()
     local configFile = assert(io.open(self.DNSMASQ_DATA_FILE, "w"), "Could not open dnsmasq config")
-    configFile:setvbuf("no")
+    --configFile:setvbuf("no")
     if self.OPT_EXCLUDE_MASKS and #self.OPT_EXCLUDE_MASKS > 0 then
         for sld in pairs(self.sldTable) do
             for _, pattern in ipairs(self.OPT_EXCLUDE_MASKS) do
@@ -334,7 +351,8 @@ function BlackListParser:makeDnsmasqConfig()
             end
         end
     end
-    for fqdn, sld in pairs(self.fqdnTable) do
+    for fqdn in pairs(self.fqdnTable) do
+        local sld = self:getSLD(fqdn)
         local keyValue = fqdn
         if (not self.fqdnTable[sld] or fqdn == sld) and self.sldTable[sld] then
             if (self.SD_LIMIT and self.SD_LIMIT > 0 and not self.OPT_EXCLUDE_SLD[sld]) and self.sldTable[sld] >= self.SD_LIMIT then
@@ -353,8 +371,9 @@ end
 
 function BlackListParser:makeIpsetConfig()
     local configFile = assert(io.open(self.IP_DATA_FILE, "w"), "Could not open ipset config")
-    configFile:setvbuf("no")
-    for ipaddr, subnet in pairs(self.ipTable) do
+    --configFile:setvbuf("no")
+    for ipaddr in pairs(self.ipTable) do
+        local subnet = self:getSubnet(ipaddr)
         local keyValue, ipset
         if self.ipSubnetTable[subnet] then
             if (self.IP_LIMIT and self.IP_LIMIT > 0 and not self.OPT_EXCLUDE_NETS[subnet]) and self.ipSubnetTable[subnet] >= self.IP_LIMIT then
@@ -407,16 +426,11 @@ function BlackListParser:chunkBuffer()
 end
 
 function BlackListParser:getHttpData(url)
-    local retVal
+    local retVal, retCode, retHeaders
     local httpModule = url:match("^https") and https or http
     if httpModule then
         local httpSink = ltn12.sink.chain(self:chunkBuffer(), self:sink())
         retVal, retCode, retHeaders = httpModule.request{url = url, sink = httpSink, headers = self.httpSendHeadersTable}
-        --[[
-        for k, v in pairs(retHeaders) do
-            print(k, v)
-        end
-        --]]
         if not retVal or retCode ~= 200 then
             retVal = nil
             print(string.format("Connection error! (%s) URL: %s", retCode, url))
@@ -424,7 +438,7 @@ function BlackListParser:getHttpData(url)
     end
     if not retVal then
         local wgetSink = ltn12.sink.chain(self:chunkBuffer(), self:sink())
-        retVal = ltn12.pump.all(ltn12.source.file(io.popen(self.WGET_CMD .. " \"" .. url .. "\"", "r")), wgetSink)
+        retVal = ltn12.pump.all(ltn12.source.file(io.popen(self.WGET_CMD .. self.wgetUserAgent .. ' "' .. url .. '"', 'r')), wgetSink)
     end
     return (retVal == 1) and true or false
 end
@@ -459,11 +473,25 @@ local function ipSink(self)
     end
 end
 
+local function hybridSinkFunc(self, ipStr, fqdnStr)
+    if #fqdnStr > 0 and not fqdnStr:match("^" .. self.ipPattern .. "$") then
+        fqdnStr = fqdnStr:gsub("%*%.", ""):gsub("%.$", ""):lower()
+        if fqdnStr:match("^" .. self.fqdnPattern .. "+$") then
+            self:fillDomainTables(fqdnStr)
+        elseif self.USE_IDN and fqdnStr:match("^[^\\/&%?]-[^\\/&%?%.]+%.[^\\/&%?%.]+%.?$") then
+            fqdnStr = self:convertToPunycode(fqdnStr)
+            self:fillDomainTables(fqdnStr)
+        end
+    elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
+        self:fillIpTables(ipStr)
+    end
+end
+
     -- antizapret.info
 
 local Az = Class(BlackListParser, {
     url = Config.AZ_ALL_URL,
-    recordsSeparator = "\n",
+    ipsSeparator = ",",
     ipStringPattern = "(.-)\n",
 })
 
@@ -472,17 +500,7 @@ function Az:sink()
     return function(chunk)
         if chunk and chunk ~= "" then
             for fqdnStr, ipStr in chunk:gmatch(entryPattern) do
-                if #fqdnStr > 0 and not fqdnStr:match("^" .. self.ipPattern .. "$") then
-                    fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
-                    if fqdnStr:match("^" .. self.fqdnPattern .. "+$") then
-                        self:fillDomainTables(fqdnStr)
-                    elseif self.USE_IDN and fqdnStr:match("^[^\\/&%?]-[^\\/&%?%.]+%.[^\\/&%?%.]+%.?$") then
-                        fqdnStr = self:convertToPunycode(fqdnStr)
-                        self:fillDomainTables(fqdnStr)
-                    end
-                elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
-                    self:fillIpTables(ipStr)
-                end
+                hybridSinkFunc(self, ipStr, fqdnStr)
             end
         end
         return true
@@ -490,7 +508,7 @@ function Az:sink()
 end
 
 local AzFqdn = Class(Az, {
-    url = Config.AZ_FQDN_URL
+    url = Config.AZ_FQDN_URL,
 })
 
 local AzIp = Class(Az, {
@@ -502,13 +520,33 @@ local AzIp = Class(Az, {
 
 local Rbl = Class(BlackListParser, {
     url = Config.RBL_ALL_URL,
-    recordsSeparator = "\\n",
-    ipsSeparator = " | ",
-    ipStringPattern = "([a-f0-9%.:/ |]+);.-\\n",
+    ipsSeparator = ", ",
+    ipStringPattern = "([a-f0-9/.:]+),?\n?",
+})
+
+function Rbl:sink()
+    return function(chunk)
+        if chunk and chunk ~= "" then
+            for ipStr, fqdnStr in chunk:gmatch("%[([a-f0-9/.:', ]+)%],([^,]-),.-" .. self.recordsSeparator) do
+                hybridSinkFunc(self, ipStr, fqdnStr)
+            end
+        end
+        return true
+    end
+end
+
+local RblIp = Class(Rbl, {
+    url = Config.RBL_IP_URL,
+    sink = ipSink,
+})
+
+local RblFqdn = Class(BlackListParser, {
+    url = Config.RBL_FQDN_URL,
+    recordsSeparator = ", ",
     unicodeHexPattern = "\\u(%x%x%x%x)",
 })
 
-function Rbl:hexToUnicode(code)
+function RblFqdn:hexToUnicode(code)
     local n = tonumber(code, 16)
     if n < 128 then
         return string.char(n)
@@ -519,20 +557,20 @@ function Rbl:hexToUnicode(code)
     end
 end
 
-function Rbl:sink()
+function RblFqdn:sink()
     return function(chunk)
         if chunk and chunk ~= "" then
-            for ipStr, fqdnStr in chunk:gmatch("([^;]-);([^;]-);.-" .. self.recordsSeparator) do
+            for fqdnStr in chunk:gmatch('"(.-)",? ?') do
                 if #fqdnStr > 0 and not fqdnStr:match("^" .. self.ipPattern .. "$") then
-                    fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
+                    fqdnStr = fqdnStr:gsub("%*%.", ""):gsub("%.$", ""):lower()
                     if self.USE_IDN and fqdnStr:match(self.unicodeHexPattern) then
                         fqdnStr = self:convertToPunycode(fqdnStr:gsub(self.unicodeHexPattern, function(s) return self:hexToUnicode(s) end))
                     end
                     if fqdnStr:match("^" .. self.fqdnPattern .. "+$") then
                         self:fillDomainTables(fqdnStr)
                     end
-                elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
-                    self:fillIpTables(ipStr)
+                elseif fqdnStr:match("^" .. self.ipPattern .. "$") and #fqdnStr > 0 then
+                    self:fillIpTables(fqdnStr)
                 end
             end
         end
@@ -540,15 +578,10 @@ function Rbl:sink()
     end
 end
 
-local RblIp = Class(Rbl, {
-    sink = ipSink
-})
-
     -- zapret-info
 
 local Zi = Class(BlackListParser, {
     url = Config.ZI_ALL_URL,
-    recordsSeparator = "\n",
     ipStringPattern = "([a-f0-9%.:/ |]+);.-\n",
     siteEncoding = Config.ZI_ENCODING,
 })
@@ -557,17 +590,7 @@ function Zi:sink()
     return function(chunk)
         if chunk and chunk ~= "" then
             for ipStr, fqdnStr in chunk:gmatch("([^;]-);([^;]-);.-" .. self.recordsSeparator) do
-                if #fqdnStr > 0 and not fqdnStr:match("^" .. self.ipPattern .. "$") then
-                    fqdnStr = fqdnStr:gsub("*%.", ""):gsub("%.$", ""):lower()
-                    if fqdnStr:match("^" .. self.fqdnPattern .. "+$") then
-                        self:fillDomainTables(fqdnStr)
-                    elseif self.USE_IDN and fqdnStr:match("^[^\\/&%?]-[^\\/&%?%.]+%.[^\\/&%?%.]+%.?$") then
-                        fqdnStr = self:convertToPunycode(fqdnStr)
-                        self:fillDomainTables(fqdnStr)
-                    end
-                elseif (self.BLOCK_MODE == "hybrid" or fqdnStr:match("^" .. self.ipPattern .. "$")) and #ipStr > 0 then
-                    self:fillIpTables(ipStr)
-                end
+                hybridSinkFunc(self, ipStr, fqdnStr)
             end
         end
         return true
@@ -575,14 +598,14 @@ function Zi:sink()
 end
 
 local ZiIp = Class(Zi, {
-    sink = ipSink
+    sink = ipSink,
 })
 
------------------------------- Run section --------------------------------
+------------------------------ Run section ------------------------------
 
 local ctxTable = {
     ["ip"] = {["antizapret"] = AzIp, ["rublacklist"] = RblIp, ["zapret-info"] = ZiIp},
-    ["fqdn"] = {["antizapret"] = AzFqdn, ["rublacklist"] = Rbl, ["zapret-info"] = Zi},
+    ["fqdn"] = {["antizapret"] = AzFqdn, ["rublacklist"] = RblFqdn, ["zapret-info"] = Zi},
     ["hybrid"] = {["antizapret"] = Az, ["rublacklist"] = Rbl, ["zapret-info"] = Zi},
 }
 

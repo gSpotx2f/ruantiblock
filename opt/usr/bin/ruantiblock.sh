@@ -2,12 +2,9 @@
 
 ########################################################################
 #
-# ruantiblock v0.8 (c) 2019
+#   ruantiblock
 #
-# Author:       gSpot <https://github.com/gSpotx2f/ruantiblock>
-# License:      GPLv3
-# Depends:
-# Recommends:   idn, iconv, lua, luasocket, luasec, tor, tor-geoip
+#   URL:    https://github.com/gSpotx2f/ruantiblock
 #
 ########################################################################
 
@@ -46,6 +43,8 @@ IF_VPN="tun0"
 VPN_PKTS_MARK=1
 ### Максимальное кол-во элементов списка ipset (по умол.: 65536, на данный момент уже не хватает для полного списка ip...)
 IPSET_MAXELEM=1000000
+### Удаление записей из основных сетов перед началом заполнения временных сетов при обновлении (для освобождения оперативной памяти перед заполнением сетов) (0 - off, 1 - on)
+IPSET_CLEAR_SETS=1
 ### Таймаут для записей в сете $IPSET_DNSMASQ
 IPSET_DNSMASQ_TIMEOUT=900
 ### Кол-во попыток обновления блэклиста (в случае неудачи)
@@ -55,7 +54,6 @@ MODULE_RUN_TIMEOUT=60
 
 ############################ Configuration #############################
 
-#export PATH="${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin"
 export PATH="/opt/bin:/opt/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export NAME="ruantiblock"
 export LANG="en_US.UTF-8"
@@ -66,10 +64,10 @@ DATA_DIR="/opt/var/${NAME}"
 ### Модули для получения и обработки блэклиста
 MODULES_DIR="/opt/usr/bin"
 BLLIST_MODULE_CMD="lua ${MODULES_DIR}/ruab_parser.lua"
+#BLLIST_MODULE_CMD="python3 ${MODULES_DIR}/ruab_parser.py"
 #BLLIST_MODULE_CMD="${MODULES_DIR}/ruab_parser.sh"
 #BLLIST_MODULE_CMD=""
 
-### External config
 CONFIG_FILE="/opt/etc/${NAME}/${NAME}.conf"
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
@@ -145,16 +143,16 @@ cat << EOF
  Usage: `basename $0` start|stop|destroy|restart|update|force-update|data-files|total-proxy-on|total-proxy-off|renew-ipt|status|status-html|--help
         start : Start
         stop : Stop
-        destroy : Stop + destroy ipsets and clear data files
+        destroy : Stop + destroy ipsets and clear all data files
         restart : Restart
         update : Update blacklist
         force-update : Force update blacklist
         data-files : Create ${IP_DATA_FILE} & ${DNSMASQ_DATA_FILE} (without network functions)
-        total-proxy-on : Total-proxy mode on
-        total-proxy-off : Total-proxy mode off
+        total-proxy-on : Turn on total-proxy mode
+        total-proxy-off : Turn off total-proxy mode
         renew-ipt : Renew iptables configuration
         status : Status & some info
-        html-info : Update html infopage (if HTML_INFO=1)
+        html-info : Update html info page (if HTML_INFO=1)
         -h|--help : This message
  Examples:
         `basename $0` start
@@ -180,7 +178,7 @@ DnsmasqRestart () {
 }
 
 IsIpsetExists () {
-    $IPSET_CMD list "$1" &> /dev/null
+    $IPSET_CMD list "$1" -terse &> /dev/null
     return $?
 }
 
@@ -234,7 +232,6 @@ AddIptRules () {
     local _set
     $IPT_CMD -t "$IPT_TABLE" -N "$IPT_CHAIN"
     $IPT_CMD -t "$IPT_TABLE" -I "$IPT_FIRST_CHAIN" 1 $IPT_FIRST_CHAIN_RULE
-    ### Проксификация трафика локальных клиентов
     if [ "$PROXY_LOCAL_CLIENTS" = "1" ]; then
         $IPT_CMD -t "$IPT_TABLE" -I OUTPUT 1 $IPT_OUTPUT_FIRST_RULE
         if [ "$PROXY_MODE" = "2" -a -n "$WAN_IP" ]; then
@@ -254,7 +251,6 @@ AddIptRules () {
 RemIptRules () {
     $IPT_CMD -t "$IPT_TABLE" -F "$IPT_CHAIN"
     $IPT_CMD -t "$IPT_TABLE" -D "$IPT_FIRST_CHAIN" $IPT_FIRST_CHAIN_RULE
-    ### Проксификация трафика локальных клиентов
     if [ "$PROXY_LOCAL_CLIENTS" = "1" ]; then
         $IPT_CMD -t "$IPT_TABLE" -D OUTPUT $IPT_OUTPUT_FIRST_RULE
         if [ "$PROXY_MODE" = "2" -a -n "$WAN_IP" ]; then
@@ -266,7 +262,6 @@ RemIptRules () {
 
 SetNetConfig () {
     local _set
-    ### Создание списков ipset. Проверка на наличие списка с таким же именем, если нет, то создается новый
     for _set in "$IPSET_TOTAL_PROXY" "$IPSET_CIDR_TMP" "$IPSET_CIDR"
     do
         IsIpsetExists "$_set" || $IPSET_CMD create "$_set" hash:net maxelem $IPSET_MAXELEM
@@ -287,10 +282,12 @@ DropNetConfig () {
 
 FillIpsets () {
     local _set
-    ### Заполнение списков ipset $IPSET_IP и $IPSET_CIDR. Сначала restore загружает во временные списки, а затем swap из временных добавляет в основные
     if [ -f "$IP_DATA_FILE" ]; then
         echo " Filling ipsets..."
         FlushIpSets "$IPSET_IP_TMP" "$IPSET_CIDR_TMP"
+        if [ "$IPSET_CLEAR_SETS" = "1" ]; then
+            FlushIpSets "$IPSET_IP" "$IPSET_CIDR"
+        fi
         IsIpsetExists "$IPSET_IP_TMP" && IsIpsetExists "$IPSET_CIDR_TMP" && IsIpsetExists "$IPSET_IP" && IsIpsetExists "$IPSET_CIDR" &&\
         cat "$IP_DATA_FILE" | $IPSET_CMD restore && { $IPSET_CMD swap "$IPSET_IP_TMP" "$IPSET_IP"; $IPSET_CMD swap "$IPSET_CIDR_TMP" "$IPSET_CIDR"; }
         if [ $? -eq 0 ]; then
@@ -310,8 +307,6 @@ ClearDataFiles () {
 }
 
 CheckStatus () {
-    # call: CheckStatus [ipsets]
-    # return: 0 - active; another - not running
     local _set _ipt_return=0 _ipset_return=0 _return_code=1
     $IPT_CMD -t "$IPT_TABLE" -L "$IPT_CHAIN" &> /dev/null
     _ipt_return=$?
@@ -330,7 +325,6 @@ CheckStatus () {
 PreStartCheck () {
     [ -d "$DATA_DIR" ] || mkdir -p "$DATA_DIR"
     [ "$HTML_INFO" = "1" -a ! -d "$HTML_DIR" ] && mkdir -p "$HTML_DIR"
-    ### Костыль для старта dnsmasq
     [ -e "$DNSMASQ_DATA_FILE" ] || printf "\n" > "$DNSMASQ_DATA_FILE"
 }
 
@@ -360,7 +354,7 @@ AddUserEntries () {
                             printf "server=/%s/%s\n", val, dns >> ENVIRON["DNSMASQ_DATA_FILE"];
                         printf "ipset=/%s/%s\n", val, ENVIRON["IPSET_DNSMASQ"] >> ENVIRON["DNSMASQ_DATA_FILE"];
                     };
-                    ($0 !~ /^($|#)/) {
+                    ($0 !~ /^([\040\011]*$|#)/) {
                         if($0 ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}$/ && !($0 in ip_data_array))
                             writeIpsetEntries($0, ENVIRON["IPSET_IP_TMP"]);
                         else if($0 ~ /^[0-9]{1,3}([.][0-9]{1,3}){3}[\057][0-9]{1,2}$/ && !($0 in ip_data_array))
@@ -408,7 +402,6 @@ GetDataFiles () {
     if [ "$PROXY_MODE" = "2" ]; then
         printf "\n" >> "$DNSMASQ_DATA_FILE"
     else
-        ### Запись для .onion в $DNSMASQ_DATA_FILE
         printf "server=/onion/%s\nipset=/onion/%s\n" "${ONION_DNS_ADDR}" "${IPSET_ONION}" >> "$DNSMASQ_DATA_FILE"
     fi
     rm -f "$UPDATE_PID_FILE"
@@ -619,7 +612,6 @@ case "$1" in
         HtmlInfo
     ;;
     renew-ipt)
-        ### Костыль для post_iptables_script.sh
         RenewIpt
         HtmlInfo
     ;;
