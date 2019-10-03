@@ -18,7 +18,6 @@ import re
 import socket
 import ssl
 import sys
-import time
 from urllib import request
 
 
@@ -169,7 +168,6 @@ class BlackListParser(Config):
             re.U)
         self.www_pattern = re.compile("^www[0-9]?[.]")
         self.cyr_pattern = re.compile("[а-я]", re.U)
-        self.rest = bytearray()
         self.fqdn_set = set()
         self.sld_dict = {}
         self.ip_set = set()
@@ -235,13 +233,6 @@ class BlackListParser(Config):
             if conn_object:
                 conn_object.close()
 
-    def _chunk_buffer(self, chunk):
-        if chunk is None:
-            return self.rest
-        chunk = self.rest + chunk
-        data, _, self.rest = chunk.rpartition(self.records_separator)
-        return data
-
     def _download_data(self):
         with self._make_connection(
             self.url,
@@ -252,16 +243,25 @@ class BlackListParser(Config):
             if http_code == 200:
                 while True:
                     chunk = conn_object.read(self.data_chunk)
-                    yield self._chunk_buffer(chunk or None)
+                    yield (chunk or None)
                     if not chunk:
                         break
 
-    def _processing_data(self):
+    def _align_chunk(self):
+        rest = bytes()
         for chunk in self._download_data():
+            if chunk is None:
+                yield rest
+                continue
+            data, _, rest = (rest + chunk).rpartition(self.records_separator)
+            yield data
+
+    def _split_entries(self):
+        for chunk in self._align_chunk():
             for entry in chunk.split(self.records_separator):
                 try:
-                    self.parser_func(entry.decode(
-                        self.site_encoding or self.default_site_encoding))
+                    yield entry.decode(
+                        self.site_encoding or self.default_site_encoding)
                 except UnicodeError:
                     pass
 
@@ -327,7 +327,7 @@ class BlackListParser(Config):
                 self.sld_dict[sld] = (self.sld_dict.get(sld) or 0) + 1
                 self.fqdn_set.add(string)
 
-    def parser_func(self, entry):
+    def parser_func(self):
         raise NotImplementedError()
 
     def _check_sld_masks(self, sld):
@@ -385,7 +385,7 @@ class BlackListParser(Config):
         self.ENTRIES_FILTER_PATTERNS = self._compile_filter_patterns(self.ENTRIES_FILTER_PATTERNS)
         self.IP_FILTER_PATTERNS = self._compile_filter_patterns(self.IP_FILTER_PATTERNS)
         self.records_separator = bytes(self.records_separator, "utf-8")
-        self._processing_data()
+        self.parser_func()
         if (len(self.ip_set) + len(self.cidr_set) + len(self.fqdn_set)) >= self.BLLIST_MIN_ENTRS:
             self._make_dnsmasq_config()
             self._make_ipset_config()
@@ -403,18 +403,19 @@ class AzHybrid(BlackListParser):
         self.ips_separator = ","
         self.site_encoding = self.AZ_ENCODING
 
-    def parser_func(self, entry):
-        entry_list = entry.split(self.filds_separator)
-        try:
-            if entry_list[-2]:
-                try:
-                    self.fqdn_field_processing(entry_list[-2])
-                except FieldValueError:
+    def parser_func(self):
+        for entry in self._split_entries():
+            entry_list = entry.split(self.filds_separator)
+            try:
+                if entry_list[-2]:
+                    try:
+                        self.fqdn_field_processing(entry_list[-2])
+                    except FieldValueError:
+                        self.ip_field_processing(entry_list[-1])
+                else:
                     self.ip_field_processing(entry_list[-1])
-            else:
-                self.ip_field_processing(entry_list[-1])
-        except IndexError:
-            pass
+            except IndexError:
+                pass
 
 
 class AzIp(BlackListParser):
@@ -423,8 +424,9 @@ class AzIp(BlackListParser):
         self.url = self.AZ_IP_URL
         self.ips_separator = ","
 
-    def parser_func(self, entry):
-        self.ip_field_processing(entry)
+    def parser_func(self):
+        for entry in self._split_entries():
+            self.ip_field_processing(entry)
 
 
 class AzFQDN(BlackListParser):
@@ -432,11 +434,12 @@ class AzFQDN(BlackListParser):
         super().__init__()
         self.url = self.AZ_FQDN_URL
 
-    def parser_func(self, entry):
-        try:
-            self.fqdn_field_processing(entry)
-        except FieldValueError:
-            self.ip_field_processing(entry)
+    def parser_func(self):
+        for entry in self._split_entries():
+            try:
+                self.fqdn_field_processing(entry)
+            except FieldValueError:
+                self.ip_field_processing(entry)
 
 
 class RblHybrid(BlackListParser):
@@ -446,17 +449,18 @@ class RblHybrid(BlackListParser):
         self.filds_separator = "],"
         self.ips_separator = ","
 
-    def parser_func(self, entry):
-        entry_list = entry.partition(self.filds_separator)
-        ip_string = re.sub(r"[' \]\[]", "", entry_list[0])
-        fqdn_string = re.sub(",.*$", "", entry_list[2])
-        if fqdn_string:
-            try:
-                self.fqdn_field_processing(fqdn_string)
-            except FieldValueError:
+    def parser_func(self):
+        for entry in self._split_entries():
+            entry_list = entry.partition(self.filds_separator)
+            ip_string = re.sub(r"[' \]\[]", "", entry_list[0])
+            fqdn_string = re.sub(",.*$", "", entry_list[2])
+            if fqdn_string:
+                try:
+                    self.fqdn_field_processing(fqdn_string)
+                except FieldValueError:
+                    self.ip_field_processing(ip_string)
+            else:
                 self.ip_field_processing(ip_string)
-        else:
-            self.ip_field_processing(ip_string)
 
 
 class RblIp(BlackListParser):
@@ -464,8 +468,9 @@ class RblIp(BlackListParser):
         super().__init__()
         self.url = self.RBL_IP_URL
 
-    def parser_func(self, entry):
-        self.ip_field_processing(entry.rstrip(","))
+    def parser_func(self):
+        for entry in self._split_entries():
+            self.ip_field_processing(entry.rstrip(","))
 
 
 class RblFQDN(BlackListParser):
@@ -477,16 +482,17 @@ class RblFQDN(BlackListParser):
     def hex_to_unicode(self, code):
         return chr(int(code, 16))
 
-    def parser_func(self, entry):
-        entry = entry.strip(']["')
-        try:
-            self.fqdn_field_processing(
-                re.sub(r"\\u([a-f0-9]{4})",
-                        lambda s: self.hex_to_unicode(s.group(1)),
-                        entry)
-            )
-        except FieldValueError:
-            self.ip_field_processing(entry)
+    def parser_func(self):
+        for entry in self._split_entries():
+            entry = entry.strip(']["')
+            try:
+                self.fqdn_field_processing(
+                    re.sub(r"\\u([a-f0-9]{4})",
+                            lambda s: self.hex_to_unicode(s.group(1)),
+                            entry)
+                )
+            except FieldValueError:
+                self.ip_field_processing(entry)
 
 
 class ZiHybrid(BlackListParser):
@@ -495,37 +501,40 @@ class ZiHybrid(BlackListParser):
         self.url = self.ZI_ALL_URL
         self.site_encoding = self.ZI_ENCODING
 
-    def parser_func(self, entry):
-        entry_list = entry.split(self.filds_separator)
-        try:
-            if entry_list[1]:
-                try:
-                    self.fqdn_field_processing(entry_list[1])
-                except FieldValueError:
+    def parser_func(self):
+        for entry in self._split_entries():
+            entry_list = entry.split(self.filds_separator)
+            try:
+                if entry_list[1]:
+                    try:
+                        self.fqdn_field_processing(entry_list[1])
+                    except FieldValueError:
+                        self.ip_field_processing(entry_list[0])
+                else:
                     self.ip_field_processing(entry_list[0])
-            else:
-                self.ip_field_processing(entry_list[0])
-        except IndexError:
-            pass
+            except IndexError:
+                pass
 
 
 class ZiIp(ZiHybrid):
-    def parser_func(self, entry):
-        entry_list = entry.split(self.filds_separator)
-        self.ip_field_processing(entry_list[0])
+    def parser_func(self):
+        for entry in self._split_entries():
+            entry_list = entry.split(self.filds_separator)
+            self.ip_field_processing(entry_list[0])
 
 
 class ZiFQDN(ZiHybrid):
-    def parser_func(self, entry):
-        entry_list = entry.split(self.filds_separator)
-        try:
-            if entry_list[1]:
-                try:
-                    self.fqdn_field_processing(entry_list[1])
-                except FieldValueError:
-                    self.ip_field_processing(entry_list[0])
-        except IndexError:
-            pass
+    def parser_func(self):
+        for entry in self._split_entries():
+            entry_list = entry.split(self.filds_separator)
+            try:
+                if entry_list[1]:
+                    try:
+                        self.fqdn_field_processing(entry_list[1])
+                    except FieldValueError:
+                        self.ip_field_processing(entry_list[0])
+            except IndexError:
+                pass
 
 
 if __name__ == "__main__":
@@ -543,5 +552,4 @@ if __name__ == "__main__":
         print("Wrong configuration! (Config.BLOCK_MODE or Config.BL_UPDATE_MODE)",
             file=sys.stderr)
         sys.exit(1)
-    ret_code = ctx.run()
-    sys.exit(ret_code)
+    sys.exit(ctx.run())
