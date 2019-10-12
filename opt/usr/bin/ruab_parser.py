@@ -149,6 +149,7 @@ class Config:
 
 class ParserError(Exception):
     def __init__(self, reason=None):
+        super().__init__(reason)
         self.reason = reason
 
     def __str__(self):
@@ -187,12 +188,13 @@ class BlackListParser(Config):
         self.write_buffer = -1
         self.url = "http://127.0.0.1"
         self.records_separator = "\n"
-        self.filds_separator = ";"
+        self.fields_separator = ";"
         self.ips_separator = " | "
         self.default_site_encoding = "utf-8"
         self.site_encoding = self.default_site_encoding
 
-    def _compile_filter_patterns(self, filters_seq):
+    @staticmethod
+    def _compile_filter_patterns(filters_seq):
         return {
             re.compile(i, re.U)
             for i in filters_seq
@@ -265,7 +267,8 @@ class BlackListParser(Config):
                 except UnicodeError:
                     pass
 
-    def _check_filter(self, string, filter_patterns):
+    @staticmethod
+    def _check_filter(string, filter_patterns):
         if filter_patterns and string:
             for pattern in filter_patterns:
                 if pattern and pattern.search(string):
@@ -345,14 +348,14 @@ class BlackListParser(Config):
                     if (not self._check_sld_masks(sld) and (
                             self.SD_LIMIT and sld not in self.OPT_EXCLUDE_SLD
                         )) and (self.sld_dict[sld] >= self.SD_LIMIT):
-                        recordValue = sld
+                        record_value = sld
                         del(self.sld_dict[sld])
                     else:
-                        recordValue = fqdn
+                        record_value = fqdn
                     file_handler.write(
-                        f"server=/{recordValue}/{self.ALT_DNS_ADDR}\nipset=/{recordValue}/{self.IPSET_DNSMASQ}\n"
+                        f"server=/{record_value}/{self.ALT_DNS_ADDR}\nipset=/{record_value}/{self.IPSET_DNSMASQ}\n"
                         if self.ALT_NSLOOKUP else
-                        f"ipset=/{recordValue}/{self.IPSET_DNSMASQ}\n")
+                        f"ipset=/{record_value}/{self.IPSET_DNSMASQ}\n")
                     self.output_fqdn_count += 1
 
     def _make_ipset_config(self):
@@ -363,14 +366,14 @@ class BlackListParser(Config):
                     if subnet not in self.OPT_EXCLUDE_NETS and (
                         self.IP_LIMIT and self.ip_subnet_dict[subnet] >= self.IP_LIMIT
                     ):
-                        keyValue, ipset = f"{subnet}0/24", self.IPSET_CIDR
+                        key_value, ipset = f"{subnet}0/24", self.IPSET_CIDR
                         del(self.ip_subnet_dict[subnet])
                         self.cidr_count += 1
-                        self.cidr_set.discard(keyValue)
+                        self.cidr_set.discard(key_value)
                     else:
-                        keyValue, ipset = ipaddr, self.IPSET_IP
+                        key_value, ipset = ipaddr, self.IPSET_IP
                         self.ip_count += 1
-                    file_handler.write(f"add {ipset} {keyValue}\n")
+                    file_handler.write(f"add {ipset} {key_value}\n")
             for i in self.cidr_set:
                 self.cidr_count += 1
                 file_handler.write(f"add {self.IPSET_CIDR} {i}\n")
@@ -405,7 +408,7 @@ class AzHybrid(BlackListParser):
 
     def parser_func(self):
         for entry in self._split_entries():
-            entry_list = entry.split(self.filds_separator)
+            entry_list = entry.split(self.fields_separator)
             try:
                 if entry_list[-2]:
                     try:
@@ -446,12 +449,12 @@ class RblHybrid(BlackListParser):
     def __init__(self):
         super().__init__()
         self.url = self.RBL_ALL_URL
-        self.filds_separator = "],"
+        self.fields_separator = "],"
         self.ips_separator = ","
 
     def parser_func(self):
         for entry in self._split_entries():
-            entry_list = entry.partition(self.filds_separator)
+            entry_list = entry.partition(self.fields_separator)
             ip_string = re.sub(r"[' \]\[]", "", entry_list[0])
             fqdn_string = re.sub(",.*$", "", entry_list[2])
             if fqdn_string:
@@ -479,7 +482,8 @@ class RblFQDN(BlackListParser):
         self.url = self.RBL_FQDN_URL
         self.records_separator = ", "
 
-    def hex_to_unicode(self, code):
+    @staticmethod
+    def hex_to_unicode(code):
         return chr(int(code, 16))
 
     def parser_func(self):
@@ -503,7 +507,7 @@ class ZiHybrid(BlackListParser):
 
     def parser_func(self):
         for entry in self._split_entries():
-            entry_list = entry.split(self.filds_separator)
+            entry_list = entry.split(self.fields_separator)
             try:
                 if entry_list[1]:
                     try:
@@ -519,14 +523,14 @@ class ZiHybrid(BlackListParser):
 class ZiIp(ZiHybrid):
     def parser_func(self):
         for entry in self._split_entries():
-            entry_list = entry.split(self.filds_separator)
+            entry_list = entry.split(self.fields_separator)
             self.ip_field_processing(entry_list[0])
 
 
 class ZiFQDN(ZiHybrid):
     def parser_func(self):
         for entry in self._split_entries():
-            entry_list = entry.split(self.filds_separator)
+            entry_list = entry.split(self.fields_separator)
             try:
                 if entry_list[1]:
                     try:
