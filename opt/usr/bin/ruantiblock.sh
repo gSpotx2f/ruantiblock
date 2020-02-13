@@ -586,7 +586,6 @@ EOF
             printf "</table></div>" >> "$HTML_OUTPUT"
         else
             printf "<div class=\"main\"><table class=\"info_table\"><tr class=\"list\"><td align=\"left\">${NAME} status:</td><td align=\"left\">Off</td></tr></table></div>\n" >> "$HTML_OUTPUT"
-            exit 2
         fi
         printf "</div></body></html>\n" >> "$HTML_OUTPUT"
     fi

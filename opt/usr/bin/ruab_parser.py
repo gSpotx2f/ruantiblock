@@ -27,7 +27,7 @@ CONFIG_FILE = "/opt/etc/ruantiblock/ruantiblock.conf"
 
 class Config:
     ### Тип обновления списка блокировок (antizapret, rublacklist, zapret-info)
-    BL_UPDATE_MODE = "antizapret"
+    BL_UPDATE_MODE = "rublacklist"
     ### Режим обхода блокировок: ip (если провайдер блокирует по ip), hybrid (если провайдер использует DPI, подмену DNS и пр.), fqdn (если провайдер использует DPI, подмену DNS и пр.)
     BLOCK_MODE = "hybrid"
     ### Перенаправлять DNS-запросы на альтернативный DNS-сервер для заблокированных FQDN (или в tor если провайдер блокирует сторонние DNS-серверы) (0 - off, 1 - on)

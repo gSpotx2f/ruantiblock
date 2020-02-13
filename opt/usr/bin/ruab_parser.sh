@@ -16,7 +16,7 @@
 ############################## Settings ################################
 
 ### Тип обновления списка блокировок (antizapret, rublacklist, zapret-info)
-export BL_UPDATE_MODE="antizapret"
+export BL_UPDATE_MODE="rublacklist"
 ### Режим обхода блокировок: ip (если провайдер блокирует по ip), hybrid (если провайдер использует DPI, подмену DNS и пр.), fqdn (если провайдер использует DPI, подмену DNS и пр.)
 export BLOCK_MODE="hybrid"
 ### Перенаправлять DNS-запросы на альтернативный DNS-сервер для заблокированных FQDN (или в tor если провайдер блокирует сторонние DNS-серверы) (0 - off, 1 - on)
