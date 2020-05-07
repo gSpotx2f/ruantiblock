@@ -46,7 +46,7 @@ IPSET_MAXELEM=1000000
 ### Удаление записей из основных сетов перед началом заполнения временных сетов при обновлении (для освобождения оперативной памяти перед заполнением сетов) (0 - off, 1 - on)
 IPSET_CLEAR_SETS=1
 ### Таймаут для записей в сете $IPSET_DNSMASQ
-IPSET_DNSMASQ_TIMEOUT=900
+IPSET_DNSMASQ_TIMEOUT=3600
 ### Кол-во попыток обновления блэклиста (в случае неудачи)
 MODULE_RUN_ATTEMPTS=3
 ### Таймаут между попытками обновления
@@ -463,7 +463,7 @@ Stop () {
 }
 
 RenewIpt () {
-    if [ -f "$INIT_SCRIPT" ]; then
+    if [ -x "$INIT_SCRIPT" ]; then
         RemIptRules &> /dev/null
         AddIptRules &> /dev/null
     fi
