@@ -175,7 +175,7 @@ MakeDataFiles () {
             }
             else if(ENVIRON["BL_UPDATE_MODE"] == "zapret-info") {
                 fields_separator=";";
-                ips_separator=" | ";
+                ips_separator="|";
             }
             else
                 exit 1;
