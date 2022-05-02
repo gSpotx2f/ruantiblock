@@ -6,9 +6,9 @@
 #   https://api.antizapret.info/group.php?data=ip
 #   https://api.antizapret.info/group.php?data=domain
 #   https://api.antizapret.info/all.php?type=csv
-#   https://reestr.rublacklist.net/api/v2/current/csv
-#   https://reestr.rublacklist.net/api/v2/ips/csv
-#   https://reestr.rublacklist.net/api/v2/domains/json
+#   https://reestr.rublacklist.net/api/v2/current/csv/
+#   https://reestr.rublacklist.net/api/v2/ips/csv/
+#   https://reestr.rublacklist.net/api/v2/domains/json/
 #   https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv
 #
 ########################################################################
@@ -68,9 +68,9 @@ DATA_DIR="/opt/var/${NAME}"
 AZ_ALL_URL="https://api.antizapret.info/all.php?type=csv"
 AZ_IP_URL="https://api.antizapret.info/group.php?data=ip"
 AZ_FQDN_URL="https://api.antizapret.info/group.php?data=domain"
-RBL_ALL_URL="https://reestr.rublacklist.net/api/v2/current/csv"
-RBL_IP_URL="https://reestr.rublacklist.net/api/v2/ips/csv"
-RBL_FQDN_URL="https://reestr.rublacklist.net/api/v2/domains/json"
+RBL_ALL_URL="https://reestr.rublacklist.net/api/v2/current/csv/"
+RBL_IP_URL="https://reestr.rublacklist.net/api/v2/ips/csv/"
+RBL_FQDN_URL="https://reestr.rublacklist.net/api/v2/domains/json/"
 ZI_ALL_URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
 AZ_ENCODING=""
 RBL_ENCODING=""
